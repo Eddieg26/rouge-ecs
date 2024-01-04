@@ -45,7 +45,10 @@ impl<V> SparseArray<V> {
     }
 
     pub fn contains(&self, index: usize) -> bool {
-        self.values.get(index).is_some()
+        self.values
+            .get(index)
+            .map(|value| value.is_some())
+            .unwrap_or(false)
     }
 
     pub fn len(&self) -> usize {
@@ -54,6 +57,16 @@ impl<V> SparseArray<V> {
 
     pub fn is_empty(&self) -> bool {
         self.values.is_empty()
+    }
+
+    pub fn clear(&mut self) {
+        self.values.clear();
+    }
+
+    pub fn into_immutable(self) -> ImmutableSparseArray<V> {
+        ImmutableSparseArray {
+            values: self.values.into_boxed_slice(),
+        }
     }
 }
 
@@ -80,7 +93,7 @@ impl<V> SparseSet<V> {
         }
     }
 
-    pub fn insert(&mut self, index: usize, value: V) {
+    pub fn insert(&mut self, index: usize, value: V) -> Option<V> {
         if let Some(mapped_index) = self.array.get(index) {
             self.values[*mapped_index] = value;
         } else {
@@ -89,6 +102,8 @@ impl<V> SparseSet<V> {
             self.indices.push(index);
             self.array.insert(index, mapped_index);
         }
+
+        None
     }
 
     pub fn get(&self, index: usize) -> Option<&V> {
@@ -143,6 +158,14 @@ impl<V> SparseSet<V> {
         self.indices.clear();
         self.array = SparseArray::new();
     }
+
+    pub fn into_immutable(self) -> ImmutableSparseSet<V> {
+        ImmutableSparseSet {
+            values: self.values.into_boxed_slice(),
+            indices: self.indices.into_boxed_slice(),
+            array: self.array.into_immutable(),
+        }
+    }
 }
 
 pub struct ImmutableSparseArray<V> {
@@ -150,32 +173,12 @@ pub struct ImmutableSparseArray<V> {
 }
 
 impl<V> ImmutableSparseArray<V> {
-    pub fn with_capacity(capacity: usize) -> Self {
-        let mut values: Vec<Option<V>> = Vec::with_capacity(capacity);
-        values.resize_with(capacity, || None);
-        Self {
-            values: values.into_boxed_slice(),
-        }
-    }
-
-    pub fn insert(&mut self, index: usize, value: V) {
-        self.values[index] = Some(value);
-    }
-
-    pub fn remove(&mut self, index: usize) -> Option<V> {
-        self.values[index].take()
-    }
-
     pub fn get(&self, index: usize) -> Option<&V> {
-        self.values.get(index).map(|value| value.as_ref().unwrap())
+        self.values.get(index).map(|v| v.as_ref()).unwrap_or(None)
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &V> {
-        self.values.iter().filter_map(|value| value.as_ref())
-    }
-
-    pub fn contains(&self, index: usize) -> bool {
-        self.values.get(index).is_some()
+    pub fn iter(&self) -> impl Iterator<Item = &Option<V>> {
+        self.values.iter()
     }
 
     pub fn len(&self) -> usize {
@@ -194,28 +197,10 @@ pub struct ImmutableSparseSet<V> {
 }
 
 impl<V> ImmutableSparseSet<V> {
-    pub fn with_capacity(capacity: usize) -> Self {
-        Self {
-            values: Vec::with_capacity(capacity).into_boxed_slice(),
-            indices: Vec::with_capacity(capacity).into_boxed_slice(),
-            array: ImmutableSparseArray::with_capacity(capacity),
-        }
-    }
-
     pub fn get(&self, index: usize) -> Option<&V> {
         self.array
             .get(index)
             .map(|mapped_index| &self.values[*mapped_index])
-    }
-
-    pub fn get_mut(&mut self, index: usize) -> Option<&mut V> {
-        self.array
-            .get(index)
-            .map(|mapped_index| &mut self.values[*mapped_index])
-    }
-
-    pub fn indices(&self) -> impl Iterator<Item = usize> + '_ {
-        self.indices.iter().cloned()
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &V> {
@@ -226,8 +211,8 @@ impl<V> ImmutableSparseSet<V> {
         self.values.iter_mut()
     }
 
-    pub fn contains(&self, index: usize) -> bool {
-        self.array.contains(index)
+    pub fn indices(&self) -> impl Iterator<Item = usize> + '_ {
+        self.indices.iter().cloned()
     }
 
     pub fn len(&self) -> usize {

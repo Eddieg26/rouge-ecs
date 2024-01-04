@@ -1,14 +1,20 @@
-use std::{alloc::Layout, ptr::NonNull};
+use std::{alloc::Layout, marker::PhantomData, ptr::NonNull};
 
-pub struct Ptr {
+pub struct Ptr<'a> {
     data: NonNull<u8>,
     layout: Layout,
     size: usize,
+    _marker: &'a PhantomData<()>,
 }
 
-impl Ptr {
+impl<'a> Ptr<'a> {
     pub fn new(data: NonNull<u8>, layout: Layout, size: usize) -> Self {
-        Self { data, layout, size }
+        Self {
+            data,
+            layout,
+            size,
+            _marker: &PhantomData,
+        }
     }
 
     pub fn from_data<T>(data: T) -> Self {
@@ -17,6 +23,7 @@ impl Ptr {
             data,
             layout: Layout::new::<T>(),
             size: 1,
+            _marker: &PhantomData,
         }
     }
 
@@ -25,6 +32,7 @@ impl Ptr {
             data: unsafe { NonNull::new_unchecked(self.data.as_ptr().add(offset)) },
             layout: self.layout,
             size: self.size - offset,
+            _marker: &PhantomData,
         }
     }
 
@@ -35,6 +43,7 @@ impl Ptr {
             },
             layout: self.layout,
             size: self.size - (index * self.layout.size()),
+            _marker: &PhantomData,
         }
     }
 
@@ -70,6 +79,7 @@ impl Ptr {
 pub struct Blob {
     capacity: usize,
     len: usize,
+    layout: Layout,
     aligned_layout: Layout,
     data: NonNull<u8>,
 }
@@ -80,12 +90,28 @@ impl Blob {
         let aligned_layout = Self::align_layout(&base_layout);
         let data = unsafe { std::alloc::alloc(aligned_layout) };
 
-        // println!("BASE LAYOUT: {:?}", base_layout);
-        // println!("ALIGNED LAYOUT: {:?}", aligned_layout);
-
         Self {
             capacity: 1,
             len: 0,
+            layout: base_layout,
+            aligned_layout,
+            data: NonNull::new(data).unwrap(),
+        }
+    }
+
+    pub fn from_layout(layout: Layout, capacity: usize) -> Self {
+        let aligned_layout = Self::align_layout(&layout);
+        let data = unsafe {
+            std::alloc::alloc(Layout::from_size_align_unchecked(
+                aligned_layout.size() * capacity,
+                aligned_layout.align(),
+            ))
+        };
+
+        Self {
+            capacity,
+            len: 0,
+            layout,
             aligned_layout,
             data: NonNull::new(data).unwrap(),
         }
@@ -99,9 +125,18 @@ impl Blob {
         Self {
             capacity,
             len: 0,
+            layout: base_layout,
             aligned_layout,
             data: NonNull::new(data).unwrap(),
         }
+    }
+
+    pub fn layout(&self) -> &Layout {
+        &self.layout
+    }
+
+    pub fn aligned_layout(&self) -> &Layout {
+        &self.aligned_layout
     }
 
     pub fn len(&self) -> usize {
@@ -151,6 +186,15 @@ impl Blob {
         self.len += 1;
     }
 
+    pub fn swap_remove(&mut self, index: usize) {
+        unsafe {
+            let ptr = self.data.as_ptr().add(index * self.aligned_layout.size());
+            std::ptr::copy(ptr, ptr, (self.len - index - 1) * self.layout.size());
+        }
+
+        self.len -= 1;
+    }
+
     pub fn replace<T>(&mut self, index: usize, value: T) {
         unsafe {
             let ptr = self.data.as_ptr().add(index * self.aligned_layout.size()) as *mut T;
@@ -158,7 +202,7 @@ impl Blob {
         }
     }
 
-    pub fn ptr(&self) -> Ptr {
+    pub fn ptr<'a>(&'a self) -> Ptr<'a> {
         Ptr::new(self.data, self.aligned_layout, self.len)
     }
 
@@ -187,10 +231,26 @@ impl Blob {
     }
 
     fn align_layout(layout: &Layout) -> Layout {
-        let align = std::mem::align_of::<usize>();
+        let align = if layout.align().is_power_of_two() {
+            layout.align()
+        } else {
+            layout.align().next_power_of_two()
+        };
+
         let size = layout.size();
         let padding = (align - (size % align)) % align;
 
         unsafe { Layout::from_size_align_unchecked(size + padding, align) }
+    }
+}
+
+impl Drop for Blob {
+    fn drop(&mut self) {
+        unsafe {
+            std::alloc::dealloc(
+                self.data.as_ptr(),
+                Layout::from_size_align_unchecked(self.capacity, self.aligned_layout.align()),
+            );
+        }
     }
 }

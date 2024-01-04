@@ -1,8 +1,10 @@
 use std::{
+    alloc::Layout,
     any::{Any, TypeId},
     collections::HashMap,
     fmt::Debug,
     hash::{Hash, Hasher},
+    ptr::NonNull,
 };
 
 use crate::storage::blob::Ptr;
@@ -54,7 +56,7 @@ fn hash_id(id: &std::any::TypeId) -> u64 {
 }
 
 pub struct Resources {
-    resources: HashMap<ResourceType, ResourceObj>,
+    resources: HashMap<ResourceType, ResourceData>,
 }
 
 impl Resources {
@@ -64,45 +66,73 @@ impl Resources {
         }
     }
 
-    pub fn insert<T: Resource>(&mut self, resource: T) {
+    pub fn insert<R: Resource>(&mut self, resource: R) {
         self.resources
-            .insert(ResourceType::new::<T>(), ResourceObj::new(resource));
+            .insert(ResourceType::new::<R>(), ResourceData::new(resource));
     }
 
-    fn get_obj<T: Resource>(&self) -> &ResourceObj {
-        self.resources
-            .get(&ResourceType::new::<T>())
-            .expect("Resource not found")
+    pub fn get<R: Resource>(&self) -> Res<R> {
+        self.try_get::<R>().expect("Resource doesn't exist.")
     }
 
-    fn get_obj_mut<T: Resource>(&mut self) -> &mut ResourceObj {
-        self.resources
-            .get_mut(&ResourceType::new::<T>())
-            .expect("Resource not found")
+    pub fn get_mut<R: Resource>(&self) -> ResMut<R> {
+        self.try_get_mut::<R>().expect("Resource doesn't exist.")
     }
 
-    pub fn get<T: Resource>(&self) -> Res<T> {
-        Res::new(self.get_obj::<T>().get())
+    pub fn try_get<R: Resource>(&self) -> Option<Res<R>> {
+        Some(self.resources.get(&ResourceType::new::<R>())?.res::<R>())
     }
 
-    pub fn get_mut<T: Resource>(&mut self) -> ResMut<T> {
-        ResMut::new(self.get_obj_mut::<T>().get_mut())
+    pub fn try_get_mut<R: Resource>(&self) -> Option<ResMut<R>> {
+        Some(
+            self.resources
+                .get(&ResourceType::new::<R>())?
+                .res_mut::<R>(),
+        )
     }
 }
 
-pub struct ResourceObj(Ptr);
+pub struct ResourceData {
+    data: NonNull<u8>,
+    layout: Layout,
+}
 
-impl ResourceObj {
-    pub fn new<T: Resource>(resource: T) -> Self {
-        Self(Ptr::from_data::<T>(resource))
+impl ResourceData {
+    pub fn new<R: Resource>(resource: R) -> Self {
+        let layout = Layout::new::<R>();
+        let data = unsafe { std::alloc::alloc(layout) };
+
+        let data = unsafe {
+            std::ptr::write(data as *mut R, resource);
+            NonNull::new_unchecked(data)
+        };
+
+        ResourceData { data, layout }
     }
 
-    pub fn get<T: Resource>(&self) -> &T {
-        self.0.get(0)
+    pub fn get<'a>(&'a self) -> Ptr<'a> {
+        Ptr::new(self.data, self.layout, self.layout.size())
     }
 
-    pub fn get_mut<T: Resource>(&self) -> &mut T {
-        self.0.get_mut(0)
+    pub fn res<'a, R: Resource>(&'a self) -> Res<'a, R> {
+        let resource: &R = unsafe { &*(self.data.as_ptr() as *const R) };
+        Res::new(resource)
+    }
+
+    pub fn res_mut<'a, R: Resource>(&'a self) -> ResMut<'a, R> {
+        let resource: &mut R = unsafe { &mut *(self.data.as_ptr() as *mut R) };
+        ResMut::new(resource)
+    }
+}
+
+impl Drop for ResourceData {
+    fn drop(&mut self) {
+        unsafe {
+            std::alloc::dealloc(
+                self.data.as_ptr(),
+                Layout::from_size_align_unchecked(self.layout.size(), self.layout.align()),
+            );
+        }
     }
 }
 

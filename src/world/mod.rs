@@ -1,5 +1,6 @@
 use self::resource::{Resource, Resources};
 
+pub mod query;
 pub mod resource;
 
 pub struct World {

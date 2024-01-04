@@ -18,6 +18,10 @@ impl GenId {
     }
 }
 
+pub trait IntoGenId {
+    fn into_gen_id(&self) -> GenId;
+}
+
 pub struct IdAllocator {
     next_id: usize,
     free: Vec<usize>,
