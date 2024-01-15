@@ -6,9 +6,7 @@ use self::{
 use crate::{
     archetype::Archetypes,
     core::{Component, ComponentId, Components, Entities, Entity},
-    schedule::{
-        DefaultLabel, GlobalSchedules, SceneSchedules, Schedule, ScheduleLabel, SchedulePhase,
-    },
+    schedule::{GlobalSchedules, SceneSchedules, Schedule, ScheduleLabel, SchedulePhase},
     storage::table::Tables,
     system::{action::ActionSystems, IntoSystem},
 };
@@ -55,7 +53,7 @@ impl World {
         self.resources.insert(resource);
     }
 
-    pub fn add_labeled_system<M>(
+    pub fn add_system<M>(
         &mut self,
         phase: impl SchedulePhase,
         label: impl ScheduleLabel,
@@ -65,17 +63,7 @@ impl World {
         schedules.add_system(phase, label, system);
     }
 
-    pub fn add_system<M>(&mut self, phase: impl SchedulePhase, system: impl IntoSystem<M>) {
-        let schedules = self.resources.get_mut::<GlobalSchedules>();
-        schedules.add_system(phase, DefaultLabel, system)
-    }
-
-    pub fn add_schedule(&mut self, phase: impl SchedulePhase, schedule: Schedule) {
-        let schedules = self.resources.get_mut::<GlobalSchedules>();
-        schedules.add_schedule(phase, DefaultLabel, schedule);
-    }
-
-    pub fn add_labeled_schedule(
+    pub fn add_schedule(
         &mut self,
         phase: impl SchedulePhase,
         label: impl ScheduleLabel,
@@ -119,7 +107,7 @@ impl World {
         self.resources.get_mut::<R>()
     }
 
-    pub fn spawn(&mut self) -> Entity {
+    pub fn create(&mut self) -> Entity {
         let entity = self.entities.create();
         Lifecycle::create_entity(entity, &mut self.archetypes, &mut self.tables);
         entity

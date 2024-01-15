@@ -9,12 +9,6 @@ pub trait ScheduleLabel: 'static {
     const LABEL: &'static str;
 }
 
-pub struct DefaultLabel;
-
-impl ScheduleLabel for DefaultLabel {
-    const LABEL: &'static str = "default";
-}
-
 pub trait SchedulePhase: 'static {
     const PHASE: &'static str;
 }

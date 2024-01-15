@@ -1,6 +1,6 @@
 use crate::world::actions::builtin::{DeleteEntity, RemoveComponent};
 use core::{Component, Entity};
-use schedule::SchedulePhase;
+use schedule::{ScheduleLabel, SchedulePhase};
 use system::action::ActionSystems;
 use world::{
     actions::{
@@ -29,6 +29,12 @@ impl SchedulePhase for PostUpdate {
     const PHASE: &'static str = "post_update";
 }
 
+pub struct DefaultLabel;
+
+impl ScheduleLabel for DefaultLabel {
+    const LABEL: &'static str = "default";
+}
+
 #[derive(Debug)]
 pub struct Player {
     health: u32,
@@ -49,13 +55,13 @@ impl Component for Player {}
 fn main() {
     let mut world = World::new();
     world.register::<Player>();
-    world.add_system(Update, |actions: &mut Actions| {
+    world.add_system(Update, DefaultLabel, |actions: &mut Actions| {
         println!("Hello, world!");
         actions.add(CreateEntity::new().with(Player::new(500)));
         actions.add(CreateEntity::new());
     });
 
-    world.add_system(PostUpdate, |actions: &mut Actions| {
+    world.add_system(PostUpdate, DefaultLabel, |actions: &mut Actions| {
         actions.add(DeleteEntity::new(Entity::new(0, 0)));
     });
 

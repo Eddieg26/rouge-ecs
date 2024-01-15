@@ -43,7 +43,7 @@ impl Action for CreateEntity {
     const PRIORITY: u32 = u32::MAX;
 
     fn execute(&mut self, world: &mut crate::world::World) -> Self::Output {
-        let entity = world.spawn();
+        let entity = world.create();
 
         for add_component in self.add_components.iter_mut() {
             add_component(entity, world);
