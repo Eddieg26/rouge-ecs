@@ -1,3 +1,7 @@
+use crate::{
+    core::{Component, Entity},
+    system::observer::{action::ActionOutputs, builtin::RemoveComponent},
+};
 use std::any::TypeId;
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Access {
@@ -34,5 +38,23 @@ impl AccessMeta {
                 Access::Write => writes.push(meta.ty()),
             }
         }
+    }
+}
+
+pub struct ComponentActionMeta {
+    on_remove: Box<dyn Fn(&Entity, &mut ActionOutputs)>,
+}
+
+impl ComponentActionMeta {
+    pub fn new<C: Component>() -> Self {
+        Self {
+            on_remove: Box::new(|entity, outputs: &mut ActionOutputs| {
+                outputs.add::<RemoveComponent<C>>(*entity);
+            }),
+        }
+    }
+
+    pub fn on_remove(&self) -> &dyn Fn(&Entity, &mut ActionOutputs) {
+        &self.on_remove
     }
 }

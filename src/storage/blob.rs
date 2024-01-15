@@ -1,86 +1,5 @@
+use super::ptr::Ptr;
 use std::{alloc::Layout, marker::PhantomData, ptr::NonNull};
-
-pub struct Ptr<'a> {
-    data: NonNull<u8>,
-    layout: Layout,
-    size: usize,
-    _marker: &'a PhantomData<()>,
-}
-
-fn drop<T>(data: *mut u8) {
-    unsafe {
-        std::mem::drop(Box::from_raw(data as *mut T));
-    }
-}
-
-impl<'a> Ptr<'a> {
-    pub fn new(data: NonNull<u8>, layout: Layout, size: usize) -> Self {
-        Self {
-            data,
-            layout,
-            size,
-            _marker: &PhantomData,
-        }
-    }
-
-    pub fn from_data<T: 'static>(data: T) -> Self {
-        let data = NonNull::new(&data as *const T as *mut u8).unwrap();
-        Self {
-            data,
-            layout: Layout::new::<T>(),
-            size: 1,
-            _marker: &PhantomData,
-        }
-    }
-
-    pub fn offset(&self, offset: usize) -> Self {
-        Self {
-            data: unsafe { NonNull::new_unchecked(self.data.as_ptr().add(offset)) },
-            layout: self.layout,
-            size: self.size - offset,
-            _marker: &PhantomData,
-        }
-    }
-
-    pub fn add(&self, index: usize) -> Self {
-        Self {
-            data: unsafe {
-                NonNull::new_unchecked(self.data.as_ptr().add(index * self.layout.size()))
-            },
-            layout: self.layout,
-            size: self.size - (index * self.layout.size()),
-            _marker: &PhantomData,
-        }
-    }
-
-    pub fn get<T>(&self, index: usize) -> &T {
-        unsafe { &*(self.data.as_ptr().add(index * self.layout.size()) as *const T) }
-    }
-
-    pub fn get_mut<T>(&self, index: usize) -> &mut T {
-        unsafe { &mut *(self.data.as_ptr().add(index * self.layout.size()) as *mut T) }
-    }
-
-    pub fn as_ptr(&self) -> *const u8 {
-        self.data.as_ptr()
-    }
-
-    pub fn as_mut_ptr(&self) -> *mut u8 {
-        self.data.as_ptr()
-    }
-
-    pub fn size(&self) -> usize {
-        self.size
-    }
-
-    pub fn layout(&self) -> Layout {
-        self.layout
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.size == 0
-    }
-}
 
 pub struct Blob {
     capacity: usize,
@@ -113,25 +32,6 @@ impl Blob {
         }
     }
 
-    pub fn from_layout(layout: Layout, drop: Option<fn(*mut u8)>, capacity: usize) -> Self {
-        let aligned_layout = Self::align_layout(&layout);
-        let data = unsafe {
-            std::alloc::alloc(Layout::from_size_align_unchecked(
-                aligned_layout.size() * capacity,
-                aligned_layout.align(),
-            ))
-        };
-
-        Self {
-            capacity,
-            len: 0,
-            layout,
-            aligned_layout,
-            data: NonNull::new(data).unwrap(),
-            drop,
-        }
-    }
-
     pub fn with_capacity<T>(capacity: usize) -> Self {
         let base_layout = Layout::new::<T>();
         let aligned_layout = Self::align_layout(&base_layout);
@@ -150,6 +50,23 @@ impl Blob {
             aligned_layout,
             data: NonNull::new(data).unwrap(),
             drop,
+        }
+    }
+
+    pub fn copy(&self, capacity: usize) -> Self {
+        Blob {
+            capacity,
+            len: 0,
+            layout: self.layout,
+            aligned_layout: self.aligned_layout,
+            data: NonNull::new(unsafe {
+                std::alloc::alloc(Layout::from_size_align_unchecked(
+                    self.aligned_layout.size() * capacity,
+                    self.aligned_layout.align(),
+                ))
+            })
+            .unwrap(),
+            drop: self.drop.clone(),
         }
     }
 
@@ -193,8 +110,165 @@ impl Blob {
         }
     }
 
+    pub fn to_vec<T: 'static>(&mut self) -> Vec<T> {
+        let mut vec = Vec::with_capacity(self.len);
+        while let Some(value) = self.pop() {
+            vec.push(value);
+        }
+
+        vec
+    }
+
     pub fn clear(&mut self) {
-        self.len = 0;
+        self.drop_all();
+        self.dealloc();
+    }
+
+    pub fn push<T>(&mut self, value: T) {
+        if self.len >= self.capacity {
+            self.grow();
+        }
+
+        unsafe {
+            let dst = self.offset(self.len) as *mut T;
+
+            std::ptr::write(dst, value);
+        }
+
+        self.len += 1;
+    }
+
+    pub fn pop<T>(&mut self) -> Option<T> {
+        if self.len > 0 {
+            self.len -= 1;
+            unsafe {
+                let ptr = self.offset(self.len) as *mut T;
+                let data = std::ptr::read(ptr);
+
+                Some(data)
+            }
+        } else {
+            None
+        }
+    }
+
+    pub fn extend<T>(&mut self, values: &[T]) {
+        if self.len + values.len() > self.capacity {
+            self.grow_exact(self.len + values.len());
+        }
+
+        unsafe {
+            let dst = self.offset(self.len) as *mut T;
+            std::ptr::copy_nonoverlapping(values.as_ptr(), dst, values.len());
+        }
+
+        self.len += values.len();
+    }
+
+    pub fn append(&mut self, other: &mut Blob) {
+        if self.len + other.len > self.capacity {
+            self.grow_exact(self.len + other.len);
+        }
+
+        unsafe {
+            let dst = self.offset(self.len) as *mut u8;
+            let src = other.data.as_ptr();
+            std::ptr::copy_nonoverlapping(src, dst, other.aligned_layout.size() * other.len);
+        }
+
+        self.len += other.len;
+        other.dealloc();
+    }
+
+    pub fn swap_remove(&mut self, index: usize) -> Blob {
+        unsafe {
+            let mut blob = self.copy(1);
+
+            let src = self.offset(index);
+            let dst = blob.data.as_ptr();
+            std::ptr::copy_nonoverlapping(src, dst, self.aligned_layout.size());
+
+            self.len -= 1;
+
+            blob
+        }
+    }
+
+    pub fn replace<T>(&mut self, index: usize, value: T) -> Option<T> {
+        if index < self.len {
+            unsafe {
+                let src = self.offset(index) as *mut T;
+                let mut old = std::ptr::read(src);
+                std::mem::replace(&mut old, value);
+                Some(old)
+            }
+        } else {
+            None
+        }
+    }
+
+    pub fn ptr<'a>(&'a self) -> Ptr<'a> {
+        Ptr::new(self.data, self.aligned_layout, self.len)
+    }
+
+    pub fn get<T>(&self, index: usize) -> Option<&T> {
+        if index < self.len {
+            Some(unsafe { &*(self.offset(index) as *const T) })
+        } else {
+            None
+        }
+    }
+
+    pub fn get_mut<T>(&self, index: usize) -> Option<&mut T> {
+        if index < self.len {
+            Some(unsafe { &mut *(self.offset(index) as *mut T) })
+        } else {
+            None
+        }
+    }
+}
+
+impl Blob {
+    fn align_layout(layout: &Layout) -> Layout {
+        let align = if layout.align().is_power_of_two() {
+            layout.align()
+        } else {
+            layout.align().next_power_of_two()
+        };
+
+        let size = layout.size();
+        let padding = (align - (size % align)) % align;
+
+        unsafe { Layout::from_size_align_unchecked(size + padding, align) }
+    }
+
+    fn grow(&mut self) {
+        let new_capacity = self.capacity * 2;
+        self.grow_exact(new_capacity);
+    }
+
+    fn grow_exact(&mut self, new_capacity: usize) {
+        if self.capacity >= new_capacity {
+            return;
+        }
+
+        let new_data = unsafe {
+            std::alloc::realloc(
+                self.data.as_ptr(),
+                self.aligned_layout,
+                new_capacity * self.aligned_layout.size(),
+            )
+        };
+
+        self.capacity = new_capacity;
+        self.data = NonNull::new(new_data).unwrap();
+    }
+
+    fn offset(&self, index: usize) -> *mut u8 {
+        unsafe { self.data.as_ptr().add(index * self.aligned_layout.size()) }
+    }
+
+    fn dealloc(&mut self) {
         unsafe {
             let value = std::alloc::realloc(
                 self.data.as_ptr(),
@@ -209,157 +283,26 @@ impl Blob {
             std::alloc::dealloc(value, layout);
         };
 
-        self.capacity = 0;
-    }
-
-    pub fn forget(&mut self) {
         self.len = 0;
         self.capacity = 0;
     }
 
-    pub fn push<T>(&mut self, value: T) {
-        if self.len >= self.capacity {
-            self.grow();
-        }
-
-        unsafe {
-            let ptr = self
-                .data
-                .as_ptr()
-                .add(self.len * self.aligned_layout.size()) as *mut T;
-            std::ptr::copy_nonoverlapping((&value) as *const T, ptr, 1);
-        }
-
-        self.len += 1;
-    }
-
-    fn push_data(&mut self, data: NonNull<u8>) {
-        if self.len >= self.capacity {
-            self.grow();
-        }
-
-        unsafe {
-            let dst = self
-                .data
-                .as_ptr()
-                .add(self.len * self.aligned_layout.size()) as *mut u8;
-            std::ptr::copy_nonoverlapping(data.as_ptr(), dst, self.layout.size());
-        }
-
-        self.len += 1;
-    }
-
-    pub fn merge(&mut self, mut other: Self) {
-        if self.len + other.len > self.capacity {
-            self.grow_exact(self.len + other.len);
-        }
-
-        unsafe {
-            let dst = self
-                .data
-                .as_ptr()
-                .add(self.len * self.aligned_layout.size()) as *mut u8;
-            let src = other.data.as_ptr();
-            std::ptr::copy_nonoverlapping(src, dst, other.aligned_layout.size() * other.len);
-        }
-
-        self.len += other.len;
-        other.forget();
-    }
-
-    pub fn swap_remove(&mut self, index: usize) -> Blob {
-        let blob = unsafe {
-            let dst = self.data.as_ptr().add(index * self.aligned_layout.size());
-            let dst = NonNull::new(dst).unwrap();
-            let mut blob = Blob::from_layout(self.layout, self.drop.clone(), 1);
-            blob.push_data(dst);
-
-            if self.len > 1 {
-                let src = self
-                    .data
-                    .as_ptr()
-                    .add((self.len - 1) * self.aligned_layout.size());
-
-                std::ptr::copy_nonoverlapping(src, dst.as_ptr(), self.layout.size());
+    fn drop_all(&mut self) {
+        for i in 0..self.len {
+            let ptr = unsafe { self.data.as_ptr().add(i * self.aligned_layout.size()) };
+            if let Some(drop) = &self.drop {
+                drop(ptr as *mut u8);
             }
-
-            blob
-        };
-
-        self.len -= 1;
-
-        blob
-    }
-
-    pub fn replace<T>(&mut self, index: usize, value: T) {
-        unsafe {
-            let ptr = self.data.as_ptr().add(index * self.aligned_layout.size()) as *mut T;
-            std::ptr::write(ptr, value);
         }
+
+        self.len = 0;
     }
+}
 
-    pub fn ptr<'a>(&'a self) -> Ptr<'a> {
-        Ptr::new(self.data, self.aligned_layout, self.len)
-    }
-
-    pub fn get<T>(&self, index: usize) -> Option<&T> {
-        if index < self.len {
-            Some(unsafe {
-                &*(self.data.as_ptr().add(index * self.aligned_layout.size()) as *const T)
-            })
-        } else {
-            None
-        }
-    }
-
-    pub fn get_mut<T>(&self, index: usize) -> Option<&mut T> {
-        if index < self.len {
-            Some(unsafe {
-                &mut *(self.data.as_ptr().add(index * self.aligned_layout.size()) as *mut T)
-            })
-        } else {
-            None
-        }
-    }
-
-    fn grow(&mut self) {
-        let new_capacity = self.capacity * 2;
-        let new_data = unsafe {
-            std::alloc::realloc(
-                self.data.as_ptr(),
-                self.aligned_layout,
-                new_capacity * self.aligned_layout.size(),
-            )
-        };
-
-        self.capacity = new_capacity;
-        self.data = NonNull::new(new_data).unwrap();
-    }
-
-    fn grow_exact(&mut self, new_capacity: usize) {
-        let new_data = unsafe {
-            std::alloc::realloc(
-                self.data.as_ptr(),
-                self.aligned_layout,
-                new_capacity * self.aligned_layout.size(),
-            )
-        };
-
-        self.capacity = new_capacity;
-        self.data = NonNull::new(new_data).unwrap();
-    }
-
-    fn align_layout(layout: &Layout) -> Layout {
-        let align = if layout.align().is_power_of_two() {
-            layout.align()
-        } else {
-            layout.align().next_power_of_two()
-        };
-
-        let size = layout.size();
-        let padding = (align - (size % align)) % align;
-
-        unsafe { Layout::from_size_align_unchecked(size + padding, align) }
+fn drop<T>(data: *mut u8) {
+    unsafe {
+        let raw = data as *mut T;
+        std::mem::drop(raw.read());
     }
 }
 

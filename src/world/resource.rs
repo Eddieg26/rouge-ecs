@@ -1,15 +1,14 @@
+use crate::storage::ptr::Ptr;
 use std::{
     alloc::Layout,
-    any::{Any, TypeId},
+    any::TypeId,
     collections::HashMap,
     fmt::Debug,
     hash::{Hash, Hasher},
     ptr::NonNull,
 };
 
-use crate::storage::blob::Ptr;
-
-pub trait Resource: 'static + Any {}
+pub trait Resource: 'static {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ResourceType(u64);

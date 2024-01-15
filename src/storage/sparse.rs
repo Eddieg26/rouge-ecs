@@ -247,6 +247,13 @@ where
         }
     }
 
+    pub fn drain(&mut self) -> impl Iterator<Item = (K, V)> + '_ {
+        self.keys
+            .drain(..)
+            .zip(self.values.drain(..))
+            .map(|(key, value)| (key, value))
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = (&K, &V)> {
         self.keys.iter().zip(self.values.iter())
     }
@@ -338,6 +345,15 @@ where
         }
 
         map.into_immutable()
+    }
+}
+
+impl<K, V> Default for SparseMap<K, V>
+where
+    K: Eq + std::hash::Hash + Clone,
+{
+    fn default() -> Self {
+        Self::new()
     }
 }
 

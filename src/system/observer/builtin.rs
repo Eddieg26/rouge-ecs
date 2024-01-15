@@ -1,4 +1,4 @@
-use super::{Action, ActionOutputs, Actions};
+use super::{action::Actions, Action, ActionOutputs};
 use crate::{
     core::{Component, Entity},
     world::World,
@@ -144,24 +144,6 @@ impl Action for DeleteEntity {
         world.delete(self.entity);
 
         self.entity
-    }
-}
-
-pub struct ComponentActionMeta {
-    on_remove: Box<dyn Fn(&Entity, &mut ActionOutputs)>,
-}
-
-impl ComponentActionMeta {
-    pub fn new<C: Component>() -> Self {
-        Self {
-            on_remove: Box::new(|entity, outputs: &mut ActionOutputs| {
-                outputs.add::<RemoveComponent<C>>(*entity);
-            }),
-        }
-    }
-
-    pub fn on_remove(&self) -> &dyn Fn(&Entity, &mut ActionOutputs) {
-        &self.on_remove
     }
 }
 

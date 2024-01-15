@@ -1,12 +1,10 @@
 use super::{
-    blob::{Blob, Ptr},
+    blob::Blob,
+    ptr::Ptr,
     sparse::{ImmutableSparseSet, SparseMap, SparseSet},
 };
 use crate::core::GenId;
-use std::{
-    alloc::Layout,
-    hash::{Hash, Hasher},
-};
+use std::hash::{Hash, Hasher};
 
 pub struct Column {
     data: Blob,
@@ -19,15 +17,15 @@ impl Column {
         }
     }
 
-    pub fn with_capacity<T>(capacity: usize) -> Self {
+    pub fn copy(&self, capacity: usize) -> Self {
         Self {
-            data: Blob::with_capacity::<T>(capacity),
+            data: self.data.copy(capacity),
         }
     }
 
-    pub fn from_layout(layout: Layout, drop: Option<fn(*mut u8)>, capacity: usize) -> Self {
+    pub fn with_capacity<T>(capacity: usize) -> Self {
         Self {
-            data: Blob::from_layout(layout, drop, capacity),
+            data: Blob::with_capacity::<T>(capacity),
         }
     }
 
@@ -39,8 +37,8 @@ impl Column {
         self.data.push(value);
     }
 
-    fn push_blob(&mut self, blob: Blob) {
-        self.data.merge(blob);
+    fn push_blob(&mut self, mut blob: Blob) {
+        self.data.append(&mut blob);
     }
 
     pub fn swap_remove(&mut self, index: usize) -> Blob {
@@ -122,9 +120,8 @@ impl<I: Into<GenId> + Clone> TableBuilder<I> {
         }
     }
 
-    pub fn add_column(mut self, index: usize, layout: Layout, drop: Option<fn(*mut u8)>) -> Self {
-        self.columns
-            .insert(index, Column::from_layout(layout, drop, self.capacity));
+    pub fn add_column(mut self, index: usize, column: Column) -> Self {
+        self.columns.insert(index, column);
 
         self
     }
@@ -155,12 +152,7 @@ impl<I: Into<GenId> + Clone> Table<I> {
         let mut columns = SparseSet::with_capacity(row.iter().count());
 
         for index in row.indices() {
-            let column = row.column(index).unwrap();
-            let column = Column::from_layout(
-                *column.data.layout(),
-                column.data.drop_fn().clone(),
-                capacity,
-            );
+            let column = row.column(index).unwrap().copy(capacity);
             columns.insert(index, column);
         }
 
@@ -253,8 +245,9 @@ impl<I: Into<GenId> + Clone> Table<I> {
             let mut columns = SparseSet::with_capacity(self.columns.len());
 
             for index in &self.columns.indices().collect::<Vec<_>>() {
-                let blob = self.column_mut(*index).unwrap().swap_remove(*_row);
-                let mut column = Column::from_layout(*blob.layout(), None, 1);
+                let column = self.column_mut(*index).unwrap();
+                let blob = column.swap_remove(*_row);
+                let mut column = column.copy(1);
                 column.push_blob(blob);
                 columns.insert(*index, column);
             }

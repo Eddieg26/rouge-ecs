@@ -1,6 +1,6 @@
 use self::{
-    actions::{builtin::ComponentActionMeta, Action, ActionExecutors, ActionOutputs, Actions},
     lifecycle::Lifecycle,
+    meta::ComponentActionMeta,
     resource::{Resource, Resources},
 };
 use crate::{
@@ -8,10 +8,15 @@ use crate::{
     core::{Component, ComponentId, Components, Entities, Entity},
     schedule::{GlobalSchedules, SceneSchedules, Schedule, ScheduleLabel, SchedulePhase},
     storage::table::Tables,
-    system::{action::ActionSystems, IntoSystem},
+    system::{
+        observer::{
+            action::{Action, ActionOutputs, Actions},
+            Observables, Observers,
+        },
+        IntoSystem,
+    },
 };
 
-pub mod actions;
 pub mod lifecycle;
 pub mod meta;
 pub mod query;
@@ -28,11 +33,11 @@ pub struct World {
 impl World {
     pub fn new() -> Self {
         let mut resources = Resources::new();
-        resources.insert(Actions::new());
         resources.insert(GlobalSchedules::new());
         resources.insert(SceneSchedules::new());
-        resources.insert(ActionExecutors::new());
+        resources.insert(Observables::new());
         resources.insert(ActionOutputs::new());
+        resources.insert(Actions::new());
 
         Self {
             resources,
@@ -73,10 +78,10 @@ impl World {
         schedules.add_schedule(phase, label, schedule);
     }
 
-    pub fn add_action_systems<A: Action>(&mut self, systems: ActionSystems<A>) {
+    pub fn add_observers<A: Action>(&mut self, observers: Observers<A>) {
         self.resources
-            .get_mut::<ActionExecutors>()
-            .add_systems(systems);
+            .get_mut::<Observables>()
+            .add_observers(observers);
     }
 
     pub fn component_id<C: Component>(&self) -> ComponentId {
@@ -184,17 +189,19 @@ impl World {
             return;
         }
 
-        let mut outputs = {
-            let mut actions = self.resources.get_mut::<Actions>().take();
-            let outputs = actions.execute(self);
-            let prev_outputs = self.resources.get_mut::<ActionOutputs>().take();
+        let outputs = {
+            let mut actions = std::mem::take(self.resources.get_mut::<Actions>());
+            let mut outputs = actions.execute(self);
+            let action_outputs = self.resources.get_mut::<ActionOutputs>().take();
+            std::mem::swap(&mut actions, self.resource_mut::<Actions>());
 
-            [outputs, prev_outputs]
+            outputs.merge(action_outputs);
+            outputs
         };
 
-        let mut executors = self.resources.get_mut::<ActionExecutors>().take();
-        executors.execute(&mut outputs, self);
-        std::mem::swap(&mut executors, self.resources.get_mut::<ActionExecutors>());
+        let mut observers = std::mem::take(self.resources.get_mut::<Observables>());
+        observers.execute(outputs, self);
+        std::mem::swap(&mut observers, self.resources.get_mut::<Observables>());
 
         self.flush();
     }

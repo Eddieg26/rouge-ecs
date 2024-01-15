@@ -8,8 +8,7 @@ use crate::{
 };
 use std::any::TypeId;
 
-pub mod action;
-pub mod observers;
+pub mod observer;
 
 pub struct System {
     function: Box<dyn for<'a> Fn(&'a World)>,
