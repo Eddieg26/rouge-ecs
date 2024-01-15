@@ -163,6 +163,28 @@ impl Archetypes {
         results
     }
 
+    pub fn entity_archetypes(
+        &self,
+        components: &[ComponentId],
+        without: &[ComponentId],
+        entities: &[Entity],
+    ) -> Vec<&ArchetypeId> {
+        let mut results = vec![];
+
+        for entity in entities {
+            if let Some(archetype) = self.entity_archetype(*entity) {
+                let has = components
+                    .iter()
+                    .all(|c| archetype.components().contains(c));
+                if has && without.iter().all(|c| !archetype.components().contains(c)) {
+                    results.push(archetype.id());
+                }
+            }
+        }
+
+        results
+    }
+
     pub fn add_entity(&mut self, entity: Entity) -> ArchetypeId {
         let id = ArchetypeId::new(&[]);
         self.entities.insert(entity.id(), id);

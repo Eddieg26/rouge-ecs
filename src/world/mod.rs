@@ -1,6 +1,6 @@
 use self::{
     actions::{builtin::ComponentActionMeta, Action, ActionExecutors, ActionOutputs, Actions},
-    lifecycle::LifecycleManager,
+    lifecycle::Lifecycle,
     resource::{Resource, Resources},
 };
 use crate::{
@@ -25,7 +25,6 @@ pub struct World {
     entities: Entities,
     components: Components,
     tables: Tables<Entity>,
-    lifecycle: LifecycleManager,
 }
 
 impl World {
@@ -43,7 +42,6 @@ impl World {
             entities: Entities::new(),
             components: Components::new(),
             tables: Tables::new(),
-            lifecycle: lifecycle::LifecycleManager::new(),
         }
     }
 
@@ -123,7 +121,7 @@ impl World {
 
     pub fn spawn(&mut self) -> Entity {
         let entity = self.entities.create();
-        self.lifecycle.create_entity(entity);
+        Lifecycle::create_entity(entity, &mut self.archetypes, &mut self.tables);
         entity
     }
 
@@ -150,48 +148,30 @@ impl World {
 
     pub fn add_component<C: Component>(&mut self, entity: Entity, component: C) {
         let component_id = self.components.id::<C>();
-        self.lifecycle
-            .add_component(entity, component_id, component);
-    }
-
-    pub(crate) fn create_entities(&mut self) {
-        self.lifecycle
-            .create_entities(&mut self.archetypes, &mut self.tables);
-    }
-
-    pub(crate) fn add_components<C: Component>(&mut self) {
-        let id = self.components.id::<C>();
-        self.lifecycle
-            .add_components(id, &mut self.archetypes, &mut self.tables);
-    }
-
-    pub(crate) fn remove_components<C: Component>(&mut self) {
-        let id = self.components.id::<C>();
-        self.lifecycle
-            .remove_components(id, &mut self.archetypes, &mut self.tables);
+        Lifecycle::add_component(
+            entity,
+            component_id,
+            component,
+            &mut self.archetypes,
+            &mut self.tables,
+        );
     }
 
     pub fn remove_component<C: Component>(&mut self, entity: Entity) {
         let component_id = self.components.id::<C>();
-        self.lifecycle.remove_component(entity, component_id);
+        Lifecycle::remove_component(entity, component_id, &mut self.archetypes, &mut self.tables);
     }
 
-    pub fn delete(&mut self, entity: Entity) -> Option<Vec<ComponentId>> {
-        if let Some(archetype) = self.archetypes.delete_entity(entity) {
-            let table_id = (*archetype).into();
-
-            let mut component_ids = vec![];
-            let table = self.tables.get_mut(table_id)?;
-            let row = table.remove_row(entity)?;
+    pub fn delete(&mut self, entity: Entity) {
+        if let Some(row) = Lifecycle::delete_entity(entity, &mut self.archetypes, &mut self.tables)
+        {
             for column in row.indices() {
                 let id = ComponentId::from(column);
-                component_ids.push(id);
+                if let Some(meta) = self.components.meta(id).extension::<ComponentActionMeta>() {
+                    (meta.on_remove())(&entity, self.resources.get_mut::<ActionOutputs>());
+                }
             }
-
-            return Some(component_ids);
         }
-
-        None
     }
 
     fn flush(&mut self) {

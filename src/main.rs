@@ -54,6 +54,7 @@ fn main() {
     world.add_system(Update, |actions: &mut Actions| {
         println!("Hello, world!");
         actions.add(CreateEntity::new().with(Player::new(500)));
+        actions.add(CreateEntity::new());
     });
 
     world.add_system(PostUpdate, |actions: &mut Actions| {
@@ -62,7 +63,7 @@ fn main() {
 
     let add_player_systems = ActionSystems::<AddComponent<Player>>::new().add_system(
         |entities: &[Entity], q: Query<&Player>| {
-            for player in q {
+            for player in q.entities(entities) {
                 println!("Player{:?}", player);
             }
         },

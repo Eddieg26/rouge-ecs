@@ -85,18 +85,51 @@ impl BaseQuery for Entity {
     }
 }
 
-pub struct Query<'a, Q: BaseQuery> {
-    world: &'a World,
-    tables: Box<[&'a Table<Entity>]>,
-    table_index: usize,
-    row_index: usize,
-    _marker: std::marker::PhantomData<Q>,
+pub trait FilterQuery {
+    fn init(world: &World, state: &mut QueryState);
 }
 
-impl<'a, Q: BaseQuery> Query<'a, Q> {
+pub struct With<C: Component> {
+    _marker: std::marker::PhantomData<C>,
+}
+
+impl<C: Component> FilterQuery for With<C> {
+    fn init(world: &World, state: &mut QueryState) {
+        let component_id = world.component_id::<C>();
+        state.add_component(component_id);
+    }
+}
+
+pub struct Not<C: Component> {
+    _marker: std::marker::PhantomData<C>,
+}
+
+impl<C: Component> FilterQuery for Not<C> {
+    fn init(world: &World, state: &mut QueryState) {
+        let component_id = world.component_id::<C>();
+        state.add_without(component_id);
+    }
+}
+
+impl FilterQuery for () {
+    fn init(_: &World, _: &mut QueryState) {}
+}
+
+pub struct Query<'a, Q: BaseQuery, F: FilterQuery = ()> {
+    world: &'a World,
+    tables: Box<[&'a Table<Entity>]>,
+    state: QueryState,
+    table_index: usize,
+    row_index: usize,
+    _marker: std::marker::PhantomData<(Q, F)>,
+}
+
+impl<'a, Q: BaseQuery, F: FilterQuery> Query<'a, Q, F> {
     pub fn new(world: &'a World) -> Self {
         let mut state = QueryState::new();
         Q::init(world, &mut state);
+        F::init(world, &mut state);
+
         let tables = world
             .archetypes()
             .archetypes(state.components(), &[])
@@ -108,6 +141,29 @@ impl<'a, Q: BaseQuery> Query<'a, Q> {
         Self {
             world,
             tables,
+            state,
+            table_index: 0,
+            row_index: 0,
+            _marker: std::marker::PhantomData,
+        }
+    }
+
+    pub fn entities(&self, entities: &'a [Entity]) -> Self {
+        let state = self.state.clone();
+        let tables = self
+            .world
+            .archetypes()
+            .entity_archetypes(state.components(), &[], entities)
+            .iter()
+            .map(|id| ArchetypeId::into(**id))
+            .collect::<Vec<_>>();
+
+        let tables = self.world.tables().array(&tables);
+
+        Self {
+            world: self.world,
+            tables,
+            state,
             table_index: 0,
             row_index: 0,
             _marker: std::marker::PhantomData,
@@ -115,19 +171,26 @@ impl<'a, Q: BaseQuery> Query<'a, Q> {
     }
 }
 
+#[derive(Clone)]
 pub struct QueryState {
     components: Vec<ComponentId>,
+    without: Vec<ComponentId>,
 }
 
 impl QueryState {
     pub fn new() -> Self {
         Self {
             components: Vec::new(),
+            without: Vec::new(),
         }
     }
 
     pub fn add_component(&mut self, component: ComponentId) {
         self.components.push(component);
+    }
+
+    pub fn add_without(&mut self, component: ComponentId) {
+        self.without.push(component);
     }
 
     pub fn components(&self) -> &[ComponentId] {
@@ -166,6 +229,7 @@ impl<Q: BaseQuery> SystemArg for Query<'_, Q> {
     }
 }
 
+#[macro_export]
 macro_rules! impl_base_query_for_tuples {
     ($(($($name:ident),+)),+) => {
         $(
@@ -191,6 +255,19 @@ macro_rules! impl_base_query_for_tuples {
                 }
             }
         )+
+    };
+}
+
+#[macro_export]
+macro_rules! impl_filter_query_for_tuple {
+    ($($filter:ident),*) => {
+        impl<$($filter: FilterQuery),*> FilterQuery for ($($filter,)*) {
+            fn init(world: &World, state: &mut QueryState) {
+                $(
+                    $filter::init(world, state);
+                )*
+            }
+        }
     };
 }
 

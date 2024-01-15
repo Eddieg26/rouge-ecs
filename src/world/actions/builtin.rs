@@ -52,10 +52,6 @@ impl Action for CreateEntity {
 
         entity
     }
-
-    fn finish(world: &mut World) {
-        world.create_entities();
-    }
 }
 
 pub struct AddComponent<C: Component> {
@@ -82,10 +78,6 @@ impl<C: Component> Action for AddComponent<C> {
         }
 
         self.entity
-    }
-
-    fn finish(world: &mut World) {
-        world.add_components::<C>()
     }
 }
 
@@ -132,10 +124,6 @@ impl<C: Component> Action for RemoveComponent<C> {
     fn skip(&self, world: &World) -> bool {
         !world.has::<C>(self.entity)
     }
-
-    fn finish(world: &mut World) {
-        world.remove_components::<C>()
-    }
 }
 
 #[derive(Debug)]
@@ -154,37 +142,26 @@ impl Action for DeleteEntity {
     const PRIORITY: u32 = CreateEntity::PRIORITY - 3;
 
     fn execute(&mut self, world: &mut crate::world::World) -> Self::Output {
-        if let Some(components) = world.delete(self.entity) {
-            for component_id in components {
-                let meta = world.components().meta(component_id);
-                let action_meta = meta.extension::<ComponentActionMeta>().expect(
-                    "ComponentActionMeta extension not found. This is a bug, please report it.",
-                );
-
-                (action_meta.on_remove())(&self.entity, world);
-            }
-        }
+        world.delete(self.entity);
 
         self.entity
     }
 }
 
 pub struct ComponentActionMeta {
-    on_remove: Box<dyn Fn(&Entity, &World)>,
+    on_remove: Box<dyn Fn(&Entity, &mut ActionOutputs)>,
 }
 
 impl ComponentActionMeta {
     pub fn new<C: Component>() -> Self {
         Self {
-            on_remove: Box::new(|entity, world| {
-                world
-                    .resource_mut::<ActionOutputs>()
-                    .add::<RemoveComponent<C>>(*entity);
+            on_remove: Box::new(|entity, outputs: &mut ActionOutputs| {
+                outputs.add::<RemoveComponent<C>>(*entity);
             }),
         }
     }
 
-    pub fn on_remove(&self) -> &dyn Fn(&Entity, &World) {
+    pub fn on_remove(&self) -> &dyn Fn(&Entity, &mut ActionOutputs) {
         &self.on_remove
     }
 }

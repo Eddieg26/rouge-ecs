@@ -22,8 +22,6 @@ pub trait Action: 'static + Debug {
     fn skip(&self, _: &World) -> bool {
         false
     }
-
-    fn finish(_world: &mut World) {}
 }
 
 pub struct ActionSystemExecutor {
@@ -112,7 +110,6 @@ impl Actions {
                     }
 
                     actions.clear();
-                    A::finish(world);
                 };
 
             actions.push(action);
