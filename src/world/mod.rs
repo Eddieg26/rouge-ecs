@@ -163,17 +163,20 @@ impl World {
     }
 
     pub fn delete(&mut self, entity: Entity) {
-        if let Some(row) = Lifecycle::delete_entity(entity, &mut self.archetypes, &mut self.tables)
-        {
-            for column in row.indices() {
-                let id = ComponentId::from(column);
-                if let Some(meta) = self.components.meta(id).extension::<ComponentActionMeta>() {
-                    (meta.on_remove())(&entity, self.resources.get_mut::<ActionOutputs>());
+        let deleted = self.entities.delete(entity, true);
+        for entity in deleted {
+            if let Some(row) =
+                Lifecycle::delete_entity(entity, &mut self.archetypes, &mut self.tables)
+            {
+                for column in row.indices() {
+                    let id = ComponentId::from(column);
+                    if let Some(meta) = self.components.meta(id).extension::<ComponentActionMeta>()
+                    {
+                        (meta.on_remove())(&entity, self.resources.get_mut::<ActionOutputs>());
+                    }
                 }
             }
         }
-
-        self.entities.delete(entity, true);
     }
 
     pub fn set_parent(&mut self, entity: Entity, parent: Option<Entity>) {

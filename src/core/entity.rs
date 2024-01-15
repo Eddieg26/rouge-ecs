@@ -45,19 +45,19 @@ impl Entities {
         Entity::new(id.id(), id.generation())
     }
 
-    pub fn delete(&mut self, entity: Entity, recursive: bool) {
-        if !self.contains(entity) {
-            return;
-        }
-
-        if recursive {
-            for child in self.children(entity, true) {
-                self.delete(child, true);
+    pub fn delete(&mut self, entity: Entity, recursive: bool) -> Vec<Entity> {
+        let mut deleted = Vec::new();
+        if let Some(node) = self.nodes.remove(&entity) {
+            if recursive {
+                for child in node.children {
+                    deleted.extend(self.delete(child, true));
+                }
             }
+            self.allocator
+                .free(GenId::new(entity.id(), entity.generation()));
+            deleted.push(entity);
         }
-
-        self.allocator.free(entity.into());
-        self.nodes.remove(&entity);
+        deleted
     }
 
     pub fn reserve(&mut self, amount: usize) {
