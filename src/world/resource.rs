@@ -9,10 +9,7 @@ use std::{
 
 use crate::storage::blob::Ptr;
 
-pub trait Resource: 'static + Any {
-    fn as_any(&self) -> &dyn Any;
-    fn as_any_mut(&mut self) -> &mut dyn Any;
-}
+pub trait Resource: 'static + Any {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ResourceType(u64);
@@ -71,24 +68,17 @@ impl Resources {
             .insert(ResourceType::new::<R>(), ResourceData::new(resource));
     }
 
-    pub fn get<R: Resource>(&self) -> Res<R> {
-        self.try_get::<R>().expect("Resource doesn't exist.")
+    pub fn get<R: Resource>(&self) -> &R {
+        let ty = ResourceType::new::<R>();
+        let res = self.resources.get(&ty).expect("Resource doesn't exist.");
+        res.get::<R>()
     }
 
-    pub fn get_mut<R: Resource>(&self) -> ResMut<R> {
-        self.try_get_mut::<R>().expect("Resource doesn't exist.")
-    }
+    pub fn get_mut<R: Resource>(&self) -> &mut R {
+        let ty = ResourceType::new::<R>();
+        let res = self.resources.get(&ty).expect("Resource doesn't exist.");
 
-    pub fn try_get<R: Resource>(&self) -> Option<Res<R>> {
-        Some(self.resources.get(&ResourceType::new::<R>())?.res::<R>())
-    }
-
-    pub fn try_get_mut<R: Resource>(&self) -> Option<ResMut<R>> {
-        Some(
-            self.resources
-                .get(&ResourceType::new::<R>())?
-                .res_mut::<R>(),
-        )
+        res.get_mut::<R>()
     }
 }
 
@@ -110,18 +100,16 @@ impl ResourceData {
         ResourceData { data, layout }
     }
 
-    pub fn get<'a>(&'a self) -> Ptr<'a> {
+    pub fn ptr<'a>(&'a self) -> Ptr<'a> {
         Ptr::new(self.data, self.layout, self.layout.size())
     }
 
-    pub fn res<'a, R: Resource>(&'a self) -> Res<'a, R> {
-        let resource: &R = unsafe { &*(self.data.as_ptr() as *const R) };
-        Res::new(resource)
+    pub fn get<R: Resource>(&self) -> &R {
+        unsafe { &*(self.data.as_ptr() as *const R) }
     }
 
-    pub fn res_mut<'a, R: Resource>(&'a self) -> ResMut<'a, R> {
-        let resource: &mut R = unsafe { &mut *(self.data.as_ptr() as *mut R) };
-        ResMut::new(resource)
+    pub fn get_mut<R: Resource>(&self) -> &mut R {
+        unsafe { &mut *(self.data.as_ptr() as *mut R) }
     }
 }
 
@@ -133,56 +121,5 @@ impl Drop for ResourceData {
                 Layout::from_size_align_unchecked(self.layout.size(), self.layout.align()),
             );
         }
-    }
-}
-
-pub struct Res<'a, T: Resource> {
-    resource: &'a T,
-}
-
-impl<'a, T: Resource> Res<'a, T> {
-    pub fn new(resource: &'a T) -> Self {
-        Self { resource }
-    }
-}
-
-impl<T> std::ops::Deref for Res<'_, T>
-where
-    T: Resource,
-{
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        self.resource
-    }
-}
-
-pub struct ResMut<'a, T: Resource> {
-    resource: &'a mut T,
-}
-
-impl<'a, T: Resource> ResMut<'a, T> {
-    pub fn new(resource: &'a mut T) -> Self {
-        Self { resource }
-    }
-}
-
-impl<T> std::ops::Deref for ResMut<'_, T>
-where
-    T: Resource,
-{
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        self.resource
-    }
-}
-
-impl<T> std::ops::DerefMut for ResMut<'_, T>
-where
-    T: Resource,
-{
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.resource
     }
 }

@@ -1,9 +1,12 @@
 use super::{
     blob::{Blob, Ptr},
-    sparse::{ImmutableSparseSet, SparseSet},
+    sparse::{ImmutableSparseSet, SparseMap, SparseSet},
 };
-use crate::core::IntoGenId;
-use std::alloc::Layout;
+use crate::core::GenId;
+use std::{
+    alloc::Layout,
+    hash::{Hash, Hasher},
+};
 
 pub struct Column {
     data: Blob,
@@ -22,26 +25,42 @@ impl Column {
         }
     }
 
-    pub fn from_layout(layout: Layout, capacity: usize) -> Self {
+    pub fn from_layout(layout: Layout, drop: Option<fn(*mut u8)>, capacity: usize) -> Self {
         Self {
-            data: Blob::from_layout(layout, capacity),
+            data: Blob::from_layout(layout, drop, capacity),
         }
+    }
+
+    pub fn from_blob(blob: Blob) -> Self {
+        Self { data: blob }
     }
 
     pub fn push<T>(&mut self, value: T) {
         self.data.push(value);
     }
 
-    pub fn swap_remove(&mut self, index: usize) {
-        self.data.swap_remove(index);
+    fn push_blob(&mut self, blob: Blob) {
+        self.data.merge(blob);
     }
 
-    pub fn get(&self, index: usize) -> Option<Ptr> {
+    pub fn swap_remove(&mut self, index: usize) -> Blob {
+        self.data.swap_remove(index)
+    }
+
+    pub fn offset(&self, index: usize) -> Option<Ptr> {
         if index < self.data.len() {
             Some(self.data.ptr().add(index))
         } else {
             None
         }
+    }
+
+    pub fn get<T>(&self, index: usize) -> Option<&T> {
+        self.data.get(index)
+    }
+
+    pub fn get_mut<T>(&self, index: usize) -> Option<&mut T> {
+        self.data.get_mut(index)
     }
 
     pub fn ptr(&self) -> Ptr {
@@ -88,13 +107,13 @@ impl std::ops::DerefMut for Row {
     }
 }
 
-pub struct TableBuilder<I: IntoGenId> {
+pub struct TableBuilder<I: Into<GenId> + Clone> {
     columns: SparseSet<Column>,
     capacity: usize,
     _marker: std::marker::PhantomData<I>,
 }
 
-impl<I: IntoGenId> TableBuilder<I> {
+impl<I: Into<GenId> + Clone> TableBuilder<I> {
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
             columns: SparseSet::with_capacity(capacity),
@@ -103,15 +122,16 @@ impl<I: IntoGenId> TableBuilder<I> {
         }
     }
 
-    pub fn add_column(mut self, index: usize, layout: Layout) -> Self {
+    pub fn add_column(mut self, index: usize, layout: Layout, drop: Option<fn(*mut u8)>) -> Self {
         self.columns
-            .insert(index, Column::from_layout(layout, self.capacity));
+            .insert(index, Column::from_layout(layout, drop, self.capacity));
 
         self
     }
 
     pub fn build(self) -> Table<I> {
         Table {
+            id: TableId::new(&self.columns.indices().collect::<Vec<_>>()),
             columns: self.columns.into_immutable(),
             rows: Vec::with_capacity(self.capacity),
             sparse: SparseSet::with_capacity(self.capacity),
@@ -119,40 +139,302 @@ impl<I: IntoGenId> TableBuilder<I> {
     }
 }
 
-pub struct Table<I: IntoGenId> {
+pub struct Table<I: Into<GenId> + Clone> {
+    id: TableId,
     columns: ImmutableSparseSet<Column>,
     rows: Vec<I>,
     sparse: SparseSet<Row>,
 }
 
-impl<I: IntoGenId> Table<I> {
+impl<I: Into<GenId> + Clone> Table<I> {
     pub fn with_capacity(capacity: usize) -> TableBuilder<I> {
         TableBuilder::with_capacity(capacity)
     }
 
-    pub fn add_row<V>(&mut self, id: I) -> Row {
-        let index = self.rows.len();
-        let row = Row::new(index);
+    pub fn from_row(row: &TableRow<I>, capacity: usize) -> Self {
+        let mut columns = SparseSet::with_capacity(row.iter().count());
 
-        self.rows.push(id);
-        self.sparse.insert(index, row);
+        for index in row.indices() {
+            let column = row.column(index).unwrap();
+            let column = Column::from_layout(
+                *column.data.layout(),
+                column.data.drop_fn().clone(),
+                capacity,
+            );
+            columns.insert(index, column);
+        }
 
-        row
+        Self {
+            id: TableId::new(&columns.indices().collect::<Vec<_>>()),
+            columns: columns.into_immutable(),
+            rows: Vec::with_capacity(capacity),
+            sparse: SparseSet::with_capacity(capacity),
+        }
     }
 
-    pub fn remove_row(&mut self, row: Row) -> Option<I> {
-        let index = *row;
+    pub fn id(&self) -> TableId {
+        self.id
+    }
 
-        if index < self.rows.len() {
-            let id = self.rows.swap_remove(index);
-            self.sparse.remove(index);
+    pub fn cell(&self, row: I, column: usize) -> Option<TableCell> {
+        let gen_id: GenId = row.into();
+        if let Some(row) = self.sparse.get(gen_id.id()) {
             self.columns
-                .iter_mut()
-                .for_each(|column| column.swap_remove(index));
-
-            Some(id)
+                .get(column)
+                .and_then(|column| column.offset(**row))
+                .map(TableCell::new)
         } else {
             None
         }
+    }
+
+    pub fn get<T>(&self, row: I, column: usize) -> Option<&T> {
+        let gen_id: GenId = row.into();
+        if let Some(row) = self.sparse.get(gen_id.id()) {
+            self.columns
+                .get(column)
+                .and_then(|column| column.get(**row))
+        } else {
+            None
+        }
+    }
+
+    pub fn get_mut<T>(&self, row: I, column: usize) -> Option<&mut T> {
+        let gen_id: GenId = row.into();
+        if let Some(row) = self.sparse.get(gen_id.id()) {
+            self.columns
+                .get(column)
+                .and_then(|column| column.get_mut(**row))
+        } else {
+            None
+        }
+    }
+
+    pub fn column(&self, index: usize) -> Option<&Column> {
+        self.columns.get(index)
+    }
+
+    pub fn column_mut(&mut self, index: usize) -> Option<&mut Column> {
+        self.columns.get_mut(index)
+    }
+
+    pub fn row(&self, row: I) -> Option<SelectedRow<I>> {
+        self.select_row(row, &self.columns.indices().collect::<Vec<_>>())
+    }
+
+    pub fn row_index(&self, row: usize) -> Option<SelectedRow<I>> {
+        self.row(self.rows.get(row)?.clone())
+    }
+
+    pub fn select_row(&self, row: I, columns: &[usize]) -> Option<SelectedRow<I>> {
+        let gen_id: GenId = row.clone().into();
+        if let Some(_row) = self.sparse.get(gen_id.id()) {
+            let mut cells = SparseSet::with_capacity(columns.len());
+
+            for &column in columns {
+                if let Some(cell) = self
+                    .columns
+                    .get(column)
+                    .and_then(|column| column.offset(**_row))
+                {
+                    cells.insert(column, TableCell::new(cell));
+                }
+            }
+
+            Some(SelectedRow::new(row, cells.into_immutable()))
+        } else {
+            None
+        }
+    }
+
+    pub fn remove_row(&mut self, row: I) -> Option<TableRow<I>> {
+        let gen_id: GenId = row.clone().into();
+        if let Some(_row) = self.sparse.remove(gen_id.id()) {
+            let mut columns = SparseSet::with_capacity(self.columns.len());
+
+            for index in &self.columns.indices().collect::<Vec<_>>() {
+                let blob = self.column_mut(*index).unwrap().swap_remove(*_row);
+                let mut column = Column::from_layout(*blob.layout(), None, 1);
+                column.push_blob(blob);
+                columns.insert(*index, column);
+            }
+
+            self.rows.swap_remove(*_row);
+
+            Some(TableRow::new(row, columns))
+        } else {
+            None
+        }
+    }
+
+    pub fn add_row(&mut self, id: I, mut row: TableRow<I>) -> Row {
+        let gen_id: GenId = id.clone().into();
+        let new_row = Row::new(self.rows.len());
+        self.sparse.insert(gen_id.id(), new_row);
+        self.rows.push(id.clone());
+
+        for index in &self.columns.indices().collect::<Vec<_>>() {
+            let mut column = row.remove(*index).expect("Missing column");
+            self.column_mut(*index)
+                .unwrap()
+                .push_blob(column.swap_remove(0));
+        }
+
+        new_row
+    }
+
+    pub fn capacity(&self) -> usize {
+        self.rows.capacity()
+    }
+
+    pub fn rows(&self) -> &[I] {
+        &self.rows
+    }
+
+    pub fn len(&self) -> usize {
+        self.rows.len()
+    }
+}
+
+pub struct TableCell<'a>(Ptr<'a>);
+
+impl<'a> TableCell<'a> {
+    pub fn new(ptr: Ptr<'a>) -> Self {
+        Self(ptr)
+    }
+
+    pub fn get<T>(&self) -> &T {
+        self.0.get(0)
+    }
+
+    pub fn get_mut<T>(&self) -> &mut T {
+        self.0.get_mut(0)
+    }
+}
+
+pub struct SelectedRow<'a, I: Into<GenId> + Clone> {
+    id: I,
+    cells: ImmutableSparseSet<TableCell<'a>>,
+}
+
+impl<'a, I: Into<GenId> + Clone> SelectedRow<'a, I> {
+    pub fn new(id: I, cells: ImmutableSparseSet<TableCell<'a>>) -> Self {
+        Self { id, cells }
+    }
+
+    pub fn id(&self) -> &I {
+        &self.id
+    }
+
+    pub fn columns(&self) -> impl Iterator<Item = usize> + '_ {
+        self.cells.indices()
+    }
+
+    pub fn cell(&self, column: usize) -> Option<&TableCell<'a>> {
+        self.cells.get(column)
+    }
+}
+
+pub struct TableRow<I: Into<GenId> + Clone> {
+    id: I,
+    columns: SparseSet<Column>,
+}
+
+impl<I: Into<GenId> + Clone> TableRow<I> {
+    pub fn new(id: I, columns: SparseSet<Column>) -> Self {
+        Self { id, columns }
+    }
+
+    pub fn id(&self) -> &I {
+        &self.id
+    }
+
+    pub fn indices(&self) -> impl Iterator<Item = usize> + '_ {
+        self.columns.indices()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &Column> {
+        self.columns.iter()
+    }
+
+    pub fn column(&self, index: usize) -> Option<&Column> {
+        self.columns.get(index)
+    }
+
+    pub fn column_mut(&mut self, index: usize) -> Option<&mut Column> {
+        self.columns.get_mut(index)
+    }
+
+    pub fn insert(&mut self, index: usize, column: Column) -> Option<Column> {
+        self.columns.insert(index, column)
+    }
+
+    pub fn remove(&mut self, index: usize) -> Option<Column> {
+        self.columns.remove(index)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct TableId(u64);
+
+impl TableId {
+    pub fn new(columns: &[usize]) -> Self {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        columns.hash(&mut hasher);
+        Self(hasher.finish())
+    }
+
+    pub fn id(&self) -> u64 {
+        self.0
+    }
+}
+
+impl From<u64> for TableId {
+    fn from(id: u64) -> Self {
+        Self(id)
+    }
+}
+
+impl std::ops::Deref for TableId {
+    type Target = u64;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+pub struct Tables<I: Into<GenId> + Clone> {
+    tables: SparseMap<TableId, Table<I>>,
+}
+
+impl<I: Into<GenId> + Clone> Tables<I> {
+    pub fn new() -> Self {
+        Self {
+            tables: SparseMap::new(),
+        }
+    }
+
+    pub fn insert(&mut self, table: Table<I>) {
+        self.tables.insert(table.id(), table);
+    }
+
+    pub fn get(&self, id: TableId) -> Option<&Table<I>> {
+        self.tables.get(&id)
+    }
+
+    pub fn get_mut(&mut self, id: TableId) -> Option<&mut Table<I>> {
+        self.tables.get_mut(&id)
+    }
+
+    pub fn array(&self, ids: &[TableId]) -> Box<[&Table<I>]> {
+        let mut array = Vec::with_capacity(ids.len());
+
+        for id in ids {
+            if let Some(table) = self.tables.get(id) {
+                array.push(table);
+            }
+        }
+
+        array.into_boxed_slice()
     }
 }

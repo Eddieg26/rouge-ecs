@@ -1,4 +1,9 @@
-use std::{alloc::Layout, any::TypeId, collections::HashMap, fmt::Debug};
+use std::{
+    alloc::Layout,
+    any::{Any, TypeId},
+    collections::HashMap,
+    fmt::Debug,
+};
 
 pub trait Component: 'static {}
 
@@ -57,6 +62,7 @@ pub struct ComponentMeta {
     name: &'static str,
     layout: Layout,
     type_id: TypeId,
+    extensions: HashMap<TypeId, Box<dyn Any>>,
 }
 
 impl ComponentMeta {
@@ -65,6 +71,7 @@ impl ComponentMeta {
             name: std::any::type_name::<T>(),
             layout: Layout::new::<T>(),
             type_id: TypeId::of::<T>(),
+            extensions: HashMap::new(),
         }
     }
 
@@ -78,6 +85,12 @@ impl ComponentMeta {
 
     pub fn type_id(&self) -> TypeId {
         self.type_id
+    }
+
+    pub fn extension<T: 'static>(&self) -> Option<&T> {
+        self.extensions
+            .get(&TypeId::of::<T>())
+            .map(|extension: &Box<dyn Any>| extension.downcast_ref::<T>().unwrap())
     }
 }
 
@@ -118,9 +131,20 @@ impl Components {
         self.id_map.contains_key(&TypeId::of::<T>())
     }
 
-    pub fn get_id<T: Component>(&self) -> Option<ComponentId> {
+    pub fn id<T: Component>(&self) -> ComponentId {
         self.id_map
             .get(&TypeId::of::<T>())
             .map(|id| ComponentId::new(*id))
+            .expect("Component not registered")
+    }
+
+    pub fn meta(&self, id: ComponentId) -> &ComponentMeta {
+        &self.components[usize::from(id)]
+    }
+
+    pub fn extend_meta<T: 'static>(&mut self, id: ComponentId, extension: T) {
+        let meta = self.components.get_mut(*id).unwrap();
+        meta.extensions
+            .insert(TypeId::of::<T>(), Box::new(extension));
     }
 }

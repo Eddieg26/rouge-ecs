@@ -1,5 +1,6 @@
 use super::{GenId, IdAllocator};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Entity {
     id: usize,
     generation: u32,
@@ -16,6 +17,12 @@ impl Entity {
 
     pub fn generation(&self) -> u32 {
         self.generation
+    }
+}
+
+impl Into<GenId> for Entity {
+    fn into(self) -> GenId {
+        GenId::new(self.id, self.generation)
     }
 }
 
