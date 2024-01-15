@@ -229,6 +229,13 @@ where
         self.map.get(key).map(|index| &mut self.values[*index])
     }
 
+    pub fn get_mut_slice<'a, F: FnMut((usize, &mut V)) -> Option<&mut V> + 'a>(
+        &'a mut self,
+        filter: F,
+    ) -> impl Iterator<Item = &mut V> + 'a {
+        self.values.iter_mut().enumerate().filter_map(filter)
+    }
+
     pub fn remove(&mut self, key: &K) -> Option<V> {
         if let Some(index) = self.map.remove(key) {
             let value = self.values.swap_remove(index);

@@ -6,14 +6,13 @@ use crate::{
 use std::{
     any::{Any, TypeId},
     collections::HashMap,
-    fmt::Debug,
 };
 
 pub mod builtin;
 
 pub type ActionSystemVec = Box<dyn Any>;
 
-pub trait Action: 'static + Debug {
+pub trait Action: 'static {
     type Output;
     const PRIORITY: u32 = 0;
 
@@ -233,7 +232,7 @@ impl ActionOutputs {
         }
     }
 
-    pub(crate) fn take(&mut self) -> Self {
+    pub fn take(&mut self) -> Self {
         let mut outputs = Self::new();
         std::mem::swap(&mut outputs, self);
         outputs

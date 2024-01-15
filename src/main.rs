@@ -1,5 +1,5 @@
+use crate::world::actions::builtin::{DeleteEntity, RemoveComponent};
 use core::{Component, Entity};
-
 use schedule::SchedulePhase;
 use system::action::ActionSystems;
 use world::{
@@ -10,8 +10,6 @@ use world::{
     query::Query,
     World,
 };
-
-use crate::world::actions::builtin::{DeleteEntity, RemoveComponent};
 
 pub mod archetype;
 pub mod core;

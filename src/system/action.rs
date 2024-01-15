@@ -9,11 +9,15 @@ pub struct ActionSystem<A: Action> {
 }
 
 impl<A: Action> ActionSystem<A> {
-    fn new(function: impl Fn(&[A::Output], &World) + 'static) -> Self {
+    fn new(
+        function: impl Fn(&[A::Output], &World) + 'static,
+        reads: Vec<TypeId>,
+        writes: Vec<TypeId>,
+    ) -> Self {
         Self {
             function: Box::new(function),
-            reads: Vec::new(),
-            writes: Vec::new(),
+            reads,
+            writes,
         }
     }
 
@@ -23,14 +27,6 @@ impl<A: Action> ActionSystem<A> {
 
     pub fn writes(&self) -> &[TypeId] {
         &self.writes
-    }
-
-    fn set_reads(&mut self, reads: Vec<TypeId>) {
-        self.reads = reads;
-    }
-
-    fn set_writes(&mut self, writes: Vec<TypeId>) {
-        self.writes = writes;
     }
 
     pub fn run(&mut self, outputs: &[A::Output], world: &World) {
@@ -67,9 +63,13 @@ where
     F: Fn(&[A::Output]) + 'static,
 {
     fn into_system(self) -> ActionSystem<A> {
-        ActionSystem::new(move |outputs: &[A::Output], _: &World| {
-            (self)(outputs);
-        })
+        ActionSystem::new(
+            move |outputs: &[A::Output], _: &World| {
+                (self)(outputs);
+            },
+            vec![],
+            vec![],
+        )
     }
 }
 
@@ -88,12 +88,9 @@ macro_rules! impl_into_action_system {
 
                 AccessMeta::collect(&mut reads, &mut writes, &metas);
 
-                let mut system = ActionSystem::<Act>::new(move |outputs: &[Act::Output], world: &World| {
+                let system = ActionSystem::<Act>::new(move |outputs: &[Act::Output], world: &World| {
                     (self)(outputs, $($arg::get(world)),*);
-                });
-
-                system.set_reads(reads);
-                system.set_writes(writes);
+                }, reads, writes);
 
                 system
             }

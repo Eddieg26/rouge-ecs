@@ -52,6 +52,12 @@ impl IdAllocator {
         self.free.push(index);
     }
 
+    pub fn free_list(&mut self, ids: impl Iterator<Item = GenId>) {
+        for id in ids {
+            self.free(id);
+        }
+    }
+
     pub fn reserve(&mut self, amount: usize) {
         let new_capacity = self.next_id + amount;
 

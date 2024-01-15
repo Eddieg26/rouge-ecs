@@ -1,10 +1,9 @@
-use std::fmt::Debug;
-
 use super::{Action, ActionOutputs, Actions};
 use crate::{
     core::{Component, Entity},
     world::World,
 };
+use std::fmt::Debug;
 
 pub struct CreateEntity {
     add_components: Vec<Box<dyn FnMut(Entity, &mut World)>>,
@@ -139,7 +138,7 @@ impl DeleteEntity {
 
 impl Action for DeleteEntity {
     type Output = Entity;
-    const PRIORITY: u32 = CreateEntity::PRIORITY - 3;
+    const PRIORITY: u32 = CreateEntity::PRIORITY - 100;
 
     fn execute(&mut self, world: &mut crate::world::World) -> Self::Output {
         world.delete(self.entity);
@@ -163,5 +162,106 @@ impl ComponentActionMeta {
 
     pub fn on_remove(&self) -> &dyn Fn(&Entity, &mut ActionOutputs) {
         &self.on_remove
+    }
+}
+
+pub struct SetParent {
+    entity: Entity,
+    parent: Option<Entity>,
+}
+
+impl SetParent {
+    pub fn new(entity: Entity, parent: Option<Entity>) -> Self {
+        Self { entity, parent }
+    }
+}
+
+impl Action for SetParent {
+    type Output = Entity;
+    const PRIORITY: u32 = CreateEntity::PRIORITY - 3;
+
+    fn execute(&mut self, world: &mut crate::world::World) -> Self::Output {
+        world.set_parent(self.entity, self.parent);
+
+        world
+            .resource_mut::<ActionOutputs>()
+            .add::<HierarchyChange>(self.entity);
+
+        self.entity
+    }
+}
+
+pub struct AddChildren {
+    entity: Entity,
+    children: Vec<Entity>,
+}
+
+impl AddChildren {
+    pub fn new(entity: Entity, children: Vec<Entity>) -> Self {
+        Self { entity, children }
+    }
+}
+
+impl Action for AddChildren {
+    type Output = Vec<Entity>;
+    const PRIORITY: u32 = CreateEntity::PRIORITY - 3;
+
+    fn execute(&mut self, world: &mut crate::world::World) -> Self::Output {
+        for child in self.children.iter() {
+            world.add_child(self.entity, *child);
+        }
+
+        world
+            .resource_mut::<ActionOutputs>()
+            .add::<HierarchyChange>(self.entity);
+
+        self.children.clone()
+    }
+}
+
+pub struct RemoveChildren {
+    entity: Entity,
+    children: Vec<Entity>,
+}
+
+impl RemoveChildren {
+    pub fn new(entity: Entity, children: Vec<Entity>) -> Self {
+        Self { entity, children }
+    }
+}
+
+impl Action for RemoveChildren {
+    type Output = Entity;
+    const PRIORITY: u32 = CreateEntity::PRIORITY - 3;
+
+    fn execute(&mut self, world: &mut crate::world::World) -> Self::Output {
+        for child in self.children.iter() {
+            world.remove_child(self.entity, *child);
+        }
+
+        world
+            .resource_mut::<ActionOutputs>()
+            .add::<HierarchyChange>(self.entity);
+
+        self.entity
+    }
+}
+
+pub struct HierarchyChange {
+    entity: Entity,
+}
+
+impl HierarchyChange {
+    pub fn new(entity: Entity) -> Self {
+        Self { entity }
+    }
+}
+
+impl Action for HierarchyChange {
+    type Output = Entity;
+    const PRIORITY: u32 = CreateEntity::PRIORITY - 4;
+
+    fn execute(&mut self, _: &mut crate::world::World) -> Self::Output {
+        self.entity
     }
 }

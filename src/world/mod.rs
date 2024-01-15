@@ -172,6 +172,20 @@ impl World {
                 }
             }
         }
+
+        self.entities.delete(entity, true);
+    }
+
+    pub fn set_parent(&mut self, entity: Entity, parent: Option<Entity>) {
+        self.entities.set_parent(entity, parent)
+    }
+
+    pub fn add_child(&mut self, entity: Entity, child: Entity) {
+        self.entities.add_child(entity, child)
+    }
+
+    pub fn remove_child(&mut self, entity: Entity, child: Entity) {
+        self.entities.remove_child(entity, child)
     }
 
     fn flush(&mut self) {

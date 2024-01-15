@@ -1,7 +1,10 @@
-use crate::world::{
-    meta::{Access, AccessMeta},
-    resource::Resource,
-    World,
+use crate::{
+    core::Entities,
+    world::{
+        meta::{Access, AccessMeta},
+        resource::Resource,
+        World,
+    },
 };
 use std::any::TypeId;
 
@@ -102,6 +105,18 @@ impl<R: Resource> SystemArg for &mut R {
     }
 }
 
+impl SystemArg for &Entities {
+    type Item<'a> = &'a Entities;
+
+    fn get<'a>(world: &'a World) -> Self::Item<'a> {
+        world.entities()
+    }
+
+    fn metas() -> Vec<AccessMeta> {
+        vec![AccessMeta::new::<Entities>(Access::Read)]
+    }
+}
+
 macro_rules! impl_into_system {
     ($($arg:ident),*) => {
         impl<F, $($arg: SystemArg),*> IntoSystem<(F, $($arg),*)> for F
@@ -153,19 +168,19 @@ impl_into_system!(A, B, C, D, E, F2);
 impl_into_system!(A, B, C, D, E, F2, G);
 impl_into_system!(A, B, C, D, E, F2, G, H);
 impl_into_system!(A, B, C, D, E, F2, G, H, I);
-impl_into_system!(A, B, C, D, E, F2, G, H, I, J);
-impl_into_system!(A, B, C, D, E, F2, G, H, I, J, K);
-impl_into_system!(A, B, C, D, E, F2, G, H, I, J, K, L);
-impl_into_system!(A, B, C, D, E, F2, G, H, I, J, K, L, M);
-impl_into_system!(A, B, C, D, E, F2, G, H, I, J, K, L, M, N);
-impl_into_system!(A, B, C, D, E, F2, G, H, I, J, K, L, M, N, O);
-impl_into_system!(A, B, C, D, E, F2, G, H, I, J, K, L, M, N, O, P);
-impl_into_system!(A, B, C, D, E, F2, G, H, I, J, K, L, M, N, O, P, Q);
-impl_into_system!(A, B, C, D, E, F2, G, H, I, J, K, L, M, N, O, P, Q, R);
-impl_into_system!(A, B, C, D, E, F2, G, H, I, J, K, L, M, N, O, P, Q, R, S);
-impl_into_system!(A, B, C, D, E, F2, G, H, I, J, K, L, M, N, O, P, Q, R, S, T);
-impl_into_system!(A, B, C, D, E, F2, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U);
-impl_into_system!(A, B, C, D, E, F2, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V);
-impl_into_system!(A, B, C, D, E, F2, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W);
-impl_into_system!(A, B, C, D, E, F2, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X);
-impl_into_system!(A, B, C, D, E, F2, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y);
+// impl_into_system!(A, B, C, D, E, F2, G, H, I, J);
+// impl_into_system!(A, B, C, D, E, F2, G, H, I, J, K);
+// impl_into_system!(A, B, C, D, E, F2, G, H, I, J, K, L);
+// impl_into_system!(A, B, C, D, E, F2, G, H, I, J, K, L, M);
+// impl_into_system!(A, B, C, D, E, F2, G, H, I, J, K, L, M, N);
+// impl_into_system!(A, B, C, D, E, F2, G, H, I, J, K, L, M, N, O);
+// impl_into_system!(A, B, C, D, E, F2, G, H, I, J, K, L, M, N, O, P);
+// impl_into_system!(A, B, C, D, E, F2, G, H, I, J, K, L, M, N, O, P, Q);
+// impl_into_system!(A, B, C, D, E, F2, G, H, I, J, K, L, M, N, O, P, Q, R);
+// impl_into_system!(A, B, C, D, E, F2, G, H, I, J, K, L, M, N, O, P, Q, R, S);
+// impl_into_system!(A, B, C, D, E, F2, G, H, I, J, K, L, M, N, O, P, Q, R, S, T);
+// impl_into_system!(A, B, C, D, E, F2, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U);
+// impl_into_system!(A, B, C, D, E, F2, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V);
+// impl_into_system!(A, B, C, D, E, F2, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W);
+// impl_into_system!(A, B, C, D, E, F2, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X);
+// impl_into_system!(A, B, C, D, E, F2, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y);
