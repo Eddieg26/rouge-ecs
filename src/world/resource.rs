@@ -8,7 +8,7 @@ use std::{
     ptr::NonNull,
 };
 
-pub trait Resource: 'static {}
+pub trait Resource: Send + Sync + 'static {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ResourceType(u64);

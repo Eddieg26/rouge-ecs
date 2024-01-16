@@ -6,7 +6,7 @@ pub struct Blob {
     len: usize,
     layout: Layout,
     aligned_layout: Layout,
-    data: NonNull<u8>,
+    data: Vec<u8>,
     drop: Option<fn(*mut u8)>,
 }
 
@@ -14,7 +14,7 @@ impl Blob {
     pub fn new<T>() -> Self {
         let base_layout = Layout::new::<T>();
         let aligned_layout = Self::align_layout(&base_layout);
-        let data = unsafe { std::alloc::alloc(aligned_layout) };
+        let data = Vec::with_capacity(aligned_layout.size());
 
         let drop = if std::mem::needs_drop::<T>() {
             Some(drop::<T> as fn(*mut u8))
@@ -27,7 +27,7 @@ impl Blob {
             len: 0,
             layout: base_layout,
             aligned_layout,
-            data: NonNull::new(data).unwrap(),
+            data,
             drop,
         }
     }
@@ -35,7 +35,7 @@ impl Blob {
     pub fn with_capacity<T>(capacity: usize) -> Self {
         let base_layout = Layout::new::<T>();
         let aligned_layout = Self::align_layout(&base_layout);
-        let data = unsafe { std::alloc::alloc(aligned_layout) };
+        let data = Vec::with_capacity(aligned_layout.size() * capacity);
 
         let drop = if std::mem::needs_drop::<T>() {
             Some(drop::<T> as fn(*mut u8))
@@ -48,7 +48,7 @@ impl Blob {
             len: 0,
             layout: base_layout,
             aligned_layout,
-            data: NonNull::new(data).unwrap(),
+            data,
             drop,
         }
     }
@@ -59,13 +59,7 @@ impl Blob {
             len: 0,
             layout: self.layout,
             aligned_layout: self.aligned_layout,
-            data: NonNull::new(unsafe {
-                std::alloc::alloc(Layout::from_size_align_unchecked(
-                    self.aligned_layout.size() * capacity,
-                    self.aligned_layout.align(),
-                ))
-            })
-            .unwrap(),
+            data: Vec::with_capacity(self.aligned_layout.size() * capacity),
             drop: self.drop.clone(),
         }
     }
@@ -76,7 +70,7 @@ impl Blob {
             len: self.len,
             layout: self.layout,
             aligned_layout: self.aligned_layout,
-            data: self.data.clone(),
+            data: std::mem::take(&mut self.data),
             drop: self.drop.clone(),
         };
 
@@ -129,12 +123,17 @@ impl Blob {
     pub fn to_vec<T: 'static>(&mut self) -> Vec<T> {
         let mut vec: Vec<T> = Vec::with_capacity(self.len);
 
-        let src = self.data.as_ptr();
+        let src = self.data.as_mut_ptr();
         let dst = vec.as_mut_ptr() as *mut u8;
 
         unsafe {
-            std::ptr::copy_nonoverlapping(src, dst, self.aligned_layout.size() * self.len);
-            vec.set_len(self.len);
+            for index in 0..self.len {
+                let src = src.add(index * self.aligned_layout.size());
+                let dst = dst.add(index * self.aligned_layout.size());
+
+                std::ptr::copy_nonoverlapping(src, dst, self.aligned_layout.size());
+            }
+            self.data.set_len(0);
         }
 
         self.len = 0;
@@ -196,7 +195,7 @@ impl Blob {
 
         unsafe {
             let dst = self.offset(self.len) as *mut u8;
-            let src = other.data.as_ptr();
+            let src = other.data.as_mut_ptr();
             std::ptr::copy_nonoverlapping(src, dst, other.aligned_layout.size() * other.len);
         }
 
@@ -206,10 +205,10 @@ impl Blob {
 
     pub fn swap_remove(&mut self, index: usize) -> Blob {
         unsafe {
-            let blob = self.copy(1);
+            let mut blob = self.copy(1);
 
             let src = self.offset(index);
-            let dst = blob.data.as_ptr();
+            let dst = blob.data.as_mut_ptr();
             std::ptr::copy_nonoverlapping(src, dst, self.aligned_layout.size());
 
             self.len -= 1;
@@ -231,7 +230,8 @@ impl Blob {
     }
 
     pub fn ptr<'a>(&'a self) -> Ptr<'a> {
-        Ptr::new(self.data, self.aligned_layout, self.len)
+        let data = NonNull::new(self.data.as_ptr() as *mut u8).unwrap();
+        Ptr::new(data, self.aligned_layout, self.len)
     }
 
     pub fn get<T>(&self, index: usize) -> Option<&T> {
@@ -275,27 +275,38 @@ impl Blob {
             return;
         }
 
-        let new_data = unsafe {
-            std::alloc::realloc(
+        let new_layout = Layout::from_size_align(
+            self.aligned_layout.size() * new_capacity,
+            self.aligned_layout.align(),
+        )
+        .unwrap();
+        let new_data = unsafe { std::alloc::alloc(new_layout) };
+
+        unsafe {
+            std::ptr::copy_nonoverlapping(
                 self.data.as_ptr(),
-                self.aligned_layout,
-                new_capacity * self.aligned_layout.size(),
-            )
-        };
+                new_data,
+                self.aligned_layout.size() * self.len,
+            );
+            self.data.clear();
+            self.data = Vec::from_raw_parts(
+                new_data,
+                self.aligned_layout.size() * self.len,
+                new_layout.size(),
+            );
+        }
 
         self.capacity = new_capacity;
-        self.data = NonNull::new(new_data).unwrap();
     }
 
     fn offset(&self, index: usize) -> *mut u8 {
-        unsafe { self.data.as_ptr().add(index * self.aligned_layout.size()) }
+        unsafe { self.data.as_ptr().add(index * self.aligned_layout.size()) as *mut u8 }
     }
 
     fn dealloc(&mut self) {
         if self.capacity > 0 {
-            unsafe {
-                std::alloc::dealloc(self.data.as_ptr(), self.aligned_layout);
-            }
+            self.data.clear();
+            self.data.shrink_to_fit();
 
             self.capacity = 0;
             self.len = 0;
@@ -311,6 +322,9 @@ impl Blob {
         }
 
         self.len = 0;
+        unsafe {
+            self.data.set_len(0);
+        }
     }
 }
 

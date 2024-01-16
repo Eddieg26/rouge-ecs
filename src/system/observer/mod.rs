@@ -82,7 +82,7 @@ where
 }
 
 pub struct ObserverSystems {
-    executor: Box<dyn Fn(Blob, &Blob, &World)>,
+    executor: Box<dyn Fn(Blob, &Blob, &World) + Send + Sync>,
     systems: Blob,
     priority: u32,
 }

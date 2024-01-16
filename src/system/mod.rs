@@ -11,13 +11,13 @@ use std::any::TypeId;
 pub mod observer;
 
 pub struct System {
-    function: Box<dyn for<'a> Fn(&'a World)>,
+    function: Box<dyn for<'a> Fn(&'a World) + Send + Sync>,
     reads: Vec<TypeId>,
     writes: Vec<TypeId>,
 }
 
 impl System {
-    fn new<F: for<'a> Fn(&'a World) + 'static>(function: F) -> Self {
+    fn new<F: for<'a> Fn(&'a World) + Send + Sync + 'static>(function: F) -> Self {
         Self {
             function: Box::new(function),
             reads: Vec::new(),
@@ -121,7 +121,7 @@ macro_rules! impl_into_system {
     ($($arg:ident),*) => {
         impl<F, $($arg: SystemArg),*> IntoSystem<(F, $($arg),*)> for F
         where
-            for<'a> F: Fn($($arg),*) + Fn($(ArgItem<'a, $arg>),*) + 'static,
+            for<'a> F: Fn($($arg),*) + Fn($(ArgItem<'a, $arg>),*) + Send + Sync + 'static,
         {
             fn into_system(self) -> System {
                 let mut reads = vec![];

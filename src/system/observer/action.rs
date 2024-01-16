@@ -7,7 +7,7 @@ use std::any::TypeId;
 pub struct ActionData {
     actions: Blob,
     priority: u32,
-    execute: Box<dyn Fn(&mut World, &mut Blob, &mut ActionOutputs)>,
+    execute: Box<dyn Fn(&mut World, &mut Blob, &mut ActionOutputs) + Send + Sync>,
 }
 
 impl ActionData {
