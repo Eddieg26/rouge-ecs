@@ -7,6 +7,7 @@ use crate::{
 };
 use core::{Component, Entity};
 use schedule::{ScheduleLabel, SchedulePhase};
+use storage::bits::BitSet;
 use world::{query::Query, World};
 
 pub mod archetype;
@@ -122,15 +123,29 @@ impl std::fmt::Debug for DebugEntity {
 }
 
 fn main() {
-    let mut actions = Blob::new::<DebugEntity>();
-    println!("BASE: {:?}", actions.layout());
-    println!("ALIGNED: {:?}", actions.aligned_layout());
-    actions.push(DebugEntity::new(0));
-    actions.push(DebugEntity::new(1));
-    actions.push(DebugEntity::new(2));
-    actions.push(DebugEntity::new(3));
+    // let mut actions = Blob::new::<DebugEntity>();
+    // println!("BASE: {:?}", actions.layout());
+    // println!("ALIGNED: {:?}", actions.aligned_layout());
+    // actions.push(DebugEntity::new(0));
+    // actions.push(DebugEntity::new(1));
+    // actions.push(DebugEntity::new(2));
+    // actions.push(DebugEntity::new(3));
 
-    for action in actions.iter::<DebugEntity>() {
-        println!("{:?}", action);
+    // for action in actions.iter::<DebugEntity>() {
+    //     println!("{:?}", action);
+    // }
+
+    let mut set = BitSet::with_capacity(10);
+    set.set(0);
+
+    set.set(6);
+    set.unset(6);
+    set.set(6);
+
+    set.set(9);
+
+    println!("SET:");
+    for (i, value) in set.iter().enumerate() {
+        println!("{}: {}", i, value);
     }
 }
