@@ -70,6 +70,22 @@ impl Blob {
         }
     }
 
+    pub fn take(&mut self) -> Self {
+        let blob = Blob {
+            capacity: self.capacity,
+            len: self.len,
+            layout: self.layout,
+            aligned_layout: self.aligned_layout,
+            data: self.data.clone(),
+            drop: self.drop.clone(),
+        };
+
+        self.capacity = 0;
+        self.len = 0;
+
+        blob
+    }
+
     pub fn layout(&self) -> &Layout {
         &self.layout
     }
@@ -111,10 +127,18 @@ impl Blob {
     }
 
     pub fn to_vec<T: 'static>(&mut self) -> Vec<T> {
-        let mut vec = Vec::with_capacity(self.len);
-        while let Some(value) = self.pop() {
-            vec.push(value);
+        let mut vec: Vec<T> = Vec::with_capacity(self.len);
+
+        let src = self.data.as_ptr();
+        let dst = vec.as_mut_ptr() as *mut u8;
+
+        unsafe {
+            std::ptr::copy_nonoverlapping(src, dst, self.aligned_layout.size() * self.len);
+            vec.set_len(self.len);
         }
+
+        self.len = 0;
+        self.capacity = 0;
 
         vec
     }
@@ -182,7 +206,7 @@ impl Blob {
 
     pub fn swap_remove(&mut self, index: usize) -> Blob {
         unsafe {
-            let mut blob = self.copy(1);
+            let blob = self.copy(1);
 
             let src = self.offset(index);
             let dst = blob.data.as_ptr();
@@ -199,8 +223,7 @@ impl Blob {
             unsafe {
                 let src = self.offset(index) as *mut T;
                 let mut old = std::ptr::read(src);
-                std::mem::replace(&mut old, value);
-                Some(old)
+                Some(std::mem::replace(&mut old, value))
             }
         } else {
             None
@@ -269,22 +292,14 @@ impl Blob {
     }
 
     fn dealloc(&mut self) {
-        unsafe {
-            let value = std::alloc::realloc(
-                self.data.as_ptr(),
-                self.aligned_layout,
-                self.aligned_layout.size(),
-            );
+        if self.capacity > 0 {
+            unsafe {
+                std::alloc::dealloc(self.data.as_ptr(), self.aligned_layout);
+            }
 
-            let layout = Layout::from_size_align_unchecked(
-                self.capacity * self.aligned_layout.size(),
-                self.aligned_layout.align(),
-            );
-            std::alloc::dealloc(value, layout);
-        };
-
-        self.len = 0;
-        self.capacity = 0;
+            self.capacity = 0;
+            self.len = 0;
+        }
     }
 
     fn drop_all(&mut self) {
@@ -308,22 +323,9 @@ fn drop<T>(data: *mut u8) {
 
 impl Drop for Blob {
     fn drop(&mut self) {
-        unsafe {
-            if self.capacity > 0 {
-                for i in 0..self.len {
-                    let ptr = self.data.as_ptr().add(i * self.aligned_layout.size());
-                    if let Some(drop) = &self.drop {
-                        drop(ptr);
-                    }
-                }
-
-                let layout = Layout::from_size_align_unchecked(
-                    self.capacity * self.aligned_layout.size(),
-                    self.aligned_layout.align(),
-                );
-
-                std::alloc::dealloc(self.data.as_ptr(), layout);
-            }
+        if self.capacity > 0 {
+            self.drop_all();
+            self.dealloc();
         }
     }
 }

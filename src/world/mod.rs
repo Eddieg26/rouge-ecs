@@ -184,6 +184,16 @@ impl World {
         self.entities.remove_child(entity, child)
     }
 
+    pub fn run<P: SchedulePhase>(&mut self) {
+        let schedules = self.resources.get::<GlobalSchedules>();
+        schedules.run::<P>(self);
+
+        let schedules = self.resources.get::<SceneSchedules>();
+        schedules.run::<P>(self);
+
+        self.flush();
+    }
+
     fn flush(&mut self) {
         if self.resources.get::<Actions>().is_empty() {
             return;
@@ -202,16 +212,6 @@ impl World {
         let mut observers = std::mem::take(self.resources.get_mut::<Observables>());
         observers.execute(outputs, self);
         std::mem::swap(&mut observers, self.resources.get_mut::<Observables>());
-
-        self.flush();
-    }
-
-    pub fn run<P: SchedulePhase>(&mut self) {
-        let schedules = self.resources.get::<GlobalSchedules>();
-        schedules.run::<P>(self);
-
-        let schedules = self.resources.get::<SceneSchedules>();
-        schedules.run::<P>(self);
 
         self.flush();
     }

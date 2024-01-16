@@ -40,8 +40,7 @@ impl ActionData {
     }
 
     pub fn clear(&mut self) -> Blob {
-        let src = Blob::from_layout(*self.actions.layout(), self.actions.drop_fn().clone(), 1);
-        std::mem::replace(&mut self.actions, src)
+        self.actions.take()
     }
 
     pub fn is_empty(&self) -> bool {
