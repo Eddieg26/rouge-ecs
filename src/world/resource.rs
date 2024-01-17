@@ -1,11 +1,10 @@
-use crate::storage::ptr::Ptr;
+use crate::storage::{blob::Blob, ptr::Ptr};
 use std::{
     alloc::Layout,
     any::TypeId,
     collections::HashMap,
     fmt::Debug,
     hash::{Hash, Hasher},
-    ptr::NonNull,
 };
 
 pub trait Resource: Send + Sync + 'static {}
@@ -82,43 +81,28 @@ impl Resources {
 }
 
 pub struct ResourceData {
-    data: NonNull<u8>,
+    data: Blob,
     layout: Layout,
 }
 
 impl ResourceData {
     pub fn new<R: Resource>(resource: R) -> Self {
         let layout = Layout::new::<R>();
-        let data = unsafe { std::alloc::alloc(layout) };
-
-        let data = unsafe {
-            std::ptr::write(data as *mut R, resource);
-            NonNull::new_unchecked(data)
-        };
+        let mut data = Blob::new::<R>();
+        data.push(resource);
 
         ResourceData { data, layout }
     }
 
     pub fn ptr<'a>(&'a self) -> Ptr<'a> {
-        Ptr::new(self.data, self.layout, self.layout.size())
+        self.data.ptr()
     }
 
     pub fn get<R: Resource>(&self) -> &R {
-        unsafe { &*(self.data.as_ptr() as *const R) }
+        self.data.get::<R>(0).unwrap()
     }
 
     pub fn get_mut<R: Resource>(&self) -> &mut R {
-        unsafe { &mut *(self.data.as_ptr() as *mut R) }
-    }
-}
-
-impl Drop for ResourceData {
-    fn drop(&mut self) {
-        unsafe {
-            std::alloc::dealloc(
-                self.data.as_ptr(),
-                Layout::from_size_align_unchecked(self.layout.size(), self.layout.align()),
-            );
-        }
+        self.data.get_mut::<R>(0).unwrap()
     }
 }

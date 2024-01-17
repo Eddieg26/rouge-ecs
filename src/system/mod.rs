@@ -17,11 +17,14 @@ pub struct System {
 }
 
 impl System {
-    fn new<F: for<'a> Fn(&'a World) + Send + Sync + 'static>(function: F) -> Self {
+    fn new<F>(function: F, reads: Vec<TypeId>, writes: Vec<TypeId>) -> Self
+    where
+        F: for<'a> Fn(&'a World) + Send + Sync + 'static,
+    {
         Self {
             function: Box::new(function),
-            reads: Vec::new(),
-            writes: Vec::new(),
+            reads,
+            writes,
         }
     }
 
@@ -33,23 +36,66 @@ impl System {
         &self.writes
     }
 
-    fn set_reads(&mut self, reads: Vec<TypeId>) {
-        self.reads = reads;
-    }
-
-    fn set_writes(&mut self, writes: Vec<TypeId>) {
-        self.writes = writes;
-    }
-
     pub fn run(&self, world: &World) {
         (self.function)(world);
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum RunMode {
-    Parallel,
-    Exclusive,
+/// A collection of systems that can be run in sequence.
+pub struct SystemSet {
+    systems: Vec<System>,
+}
+
+impl SystemSet {
+    pub fn new() -> Self {
+        Self { systems: vec![] }
+    }
+
+    pub fn add_system<M>(&mut self, system: impl IntoSystem<M>) {
+        self.systems.push(system.into_system());
+    }
+
+    pub fn append(&mut self, mut system_set: SystemSet) {
+        self.systems.append(&mut system_set.systems);
+    }
+
+    pub fn reads(&self) -> Vec<TypeId> {
+        self.systems
+            .iter()
+            .flat_map(|system| system.reads().to_vec())
+            .collect()
+    }
+
+    pub fn writes(&self) -> Vec<TypeId> {
+        self.systems
+            .iter()
+            .flat_map(|system| system.writes().to_vec())
+            .collect()
+    }
+}
+
+impl IntoSystem<()> for SystemSet {
+    fn into_system(self) -> System {
+        let mut reads = vec![];
+        let mut writes = vec![];
+
+        for system in &self.systems {
+            reads.extend(system.reads().to_vec());
+            writes.extend(system.writes().to_vec());
+        }
+
+        let system = System::new(
+            move |world| {
+                for system in &self.systems {
+                    system.run(world);
+                }
+            },
+            reads,
+            writes,
+        );
+
+        system
+    }
 }
 
 pub trait SystemArg {
@@ -130,14 +176,11 @@ macro_rules! impl_into_system {
 
                 $(metas.extend($arg::metas());)*
 
-                AccessMeta::collect(&mut reads, &mut writes, &metas);
+                AccessMeta::pick(&mut reads, &mut writes, &metas);
 
-                let mut system = System::new(move |world| {
+                let system = System::new(move |world| {
                     (self)($($arg::get(world)),*);
-                });
-
-                system.set_reads(reads);
-                system.set_writes(writes);
+                }, reads, writes);
 
                 system
             }

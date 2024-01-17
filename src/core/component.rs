@@ -5,6 +5,8 @@ use std::{
     fmt::Debug,
 };
 
+use crate::storage::blob::Blob;
+
 pub trait Component: 'static {}
 
 #[derive(Debug, Copy, Clone, Hash, Ord, PartialOrd, Eq, PartialEq)]
@@ -62,7 +64,7 @@ pub struct ComponentMeta {
     name: &'static str,
     layout: Layout,
     type_id: TypeId,
-    extensions: HashMap<TypeId, Box<dyn Any>>,
+    extensions: HashMap<TypeId, Blob>,
 }
 
 impl ComponentMeta {
@@ -90,7 +92,7 @@ impl ComponentMeta {
     pub fn extension<T: 'static>(&self) -> Option<&T> {
         self.extensions
             .get(&TypeId::of::<T>())
-            .map(|extension: &Box<dyn Any>| extension.downcast_ref::<T>().unwrap())
+            .map(|extension: &Blob| extension.get::<T>(0).unwrap())
     }
 }
 
@@ -144,7 +146,8 @@ impl Components {
 
     pub fn extend_meta<T: 'static>(&mut self, id: ComponentId, extension: T) {
         let meta = self.components.get_mut(*id).unwrap();
-        meta.extensions
-            .insert(TypeId::of::<T>(), Box::new(extension));
+        let mut blob = Blob::new::<T>();
+        blob.push(extension);
+        meta.extensions.insert(TypeId::of::<T>(), blob);
     }
 }

@@ -5,6 +5,11 @@ use crate::{
 };
 use std::any::{Any, TypeId};
 
+use self::graph::SystemGraph;
+
+pub mod graph;
+pub mod runner;
+
 pub trait ScheduleLabel: 'static {
     const LABEL: &'static str;
 }
@@ -14,42 +19,34 @@ pub trait SchedulePhase: 'static {
 }
 
 pub struct Schedule {
-    systems: Vec<System>,
+    graph: SystemGraph,
 }
 
 impl Schedule {
     pub fn new() -> Self {
         Self {
-            systems: Vec::new(),
+            graph: SystemGraph::new(),
         }
     }
 
     pub fn add_system<M>(&mut self, system: impl IntoSystem<M>) {
-        self.systems.push(system.into_system());
+        self.graph.add_system(system.into_system());
     }
 
     pub fn append(&mut self, mut schedule: Schedule) {
-        self.systems.append(&mut schedule.systems);
+        self.graph.append(&mut schedule.graph);
     }
 
     pub fn reads(&self) -> Vec<TypeId> {
-        self.systems
-            .iter()
-            .flat_map(|system| system.reads().to_vec())
-            .collect()
+        self.graph.reads()
     }
 
     pub fn writes(&self) -> Vec<TypeId> {
-        self.systems
-            .iter()
-            .flat_map(|system| system.writes().to_vec())
-            .collect()
+        self.graph.writes()
     }
 
     pub fn run(&self, world: &World) {
-        for system in &self.systems {
-            system.run(world);
-        }
+        // self.graph.run
     }
 }
 

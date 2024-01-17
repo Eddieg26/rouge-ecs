@@ -188,7 +188,7 @@ macro_rules! impl_into_observer {
 
                 $(metas.extend($arg::metas());)*
 
-                AccessMeta::collect(&mut reads, &mut writes, &metas);
+                AccessMeta::pick(&mut reads, &mut writes, &metas);
 
                 let system = Observer::<Act>::new(move |outputs: &[Act::Output], world: &World| {
                     (self)(outputs, $($arg::get(world)),*);

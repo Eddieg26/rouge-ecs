@@ -23,6 +23,10 @@ impl AccessMeta {
         }
     }
 
+    pub fn from_type(ty: TypeId, access: Access) -> Self {
+        Self { ty, access }
+    }
+
     pub fn ty(&self) -> TypeId {
         self.ty
     }
@@ -31,13 +35,20 @@ impl AccessMeta {
         self.access
     }
 
-    pub fn collect(reads: &mut Vec<TypeId>, writes: &mut Vec<TypeId>, metas: &[AccessMeta]) {
+    pub fn pick(reads: &mut Vec<TypeId>, writes: &mut Vec<TypeId>, metas: &[AccessMeta]) {
         for meta in metas {
             match meta.access() {
                 Access::Read => reads.push(meta.ty()),
                 Access::Write => writes.push(meta.ty()),
             }
         }
+    }
+
+    pub fn collect(types: &[TypeId], access: Access) -> Vec<AccessMeta> {
+        types
+            .iter()
+            .map(|&ty| AccessMeta::from_type(ty, access))
+            .collect()
     }
 }
 
