@@ -1,23 +1,24 @@
 use crate::{
     core::Entities,
     world::{
-        meta::{Access, AccessMeta},
+        meta::{Access, AccessMeta, AccessType},
         resource::Resource,
         World,
     },
 };
-use std::any::TypeId;
 
 pub mod observer;
 
 pub struct System {
     function: Box<dyn for<'a> Fn(&'a World) + Send + Sync>,
-    reads: Vec<TypeId>,
-    writes: Vec<TypeId>,
+    reads: Vec<AccessType>,
+    writes: Vec<AccessType>,
+    before: Vec<System>,
+    after: Vec<System>,
 }
 
 impl System {
-    fn new<F>(function: F, reads: Vec<TypeId>, writes: Vec<TypeId>) -> Self
+    fn new<F>(function: F, reads: Vec<AccessType>, writes: Vec<AccessType>) -> Self
     where
         F: for<'a> Fn(&'a World) + Send + Sync + 'static,
     {
@@ -25,19 +26,45 @@ impl System {
             function: Box::new(function),
             reads,
             writes,
+            before: vec![],
+            after: vec![],
         }
     }
 
-    pub fn reads(&self) -> &[TypeId] {
+    pub fn reads(&self) -> &[AccessType] {
         &self.reads
     }
 
-    pub fn writes(&self) -> &[TypeId] {
+    pub fn writes(&self) -> &[AccessType] {
         &self.writes
+    }
+
+    pub(crate) fn befores_mut(&mut self) -> &mut Vec<System> {
+        &mut self.before
+    }
+
+    pub(crate) fn afters_mut(&mut self) -> &mut Vec<System> {
+        &mut self.after
     }
 
     pub fn run(&self, world: &World) {
         (self.function)(world);
+    }
+}
+
+impl IntoSystem<()> for System {
+    fn into_system(self) -> System {
+        self
+    }
+
+    fn before<Marker>(mut self, system: impl IntoSystem<Marker>) -> System {
+        self.before.push(system.into_system());
+        self
+    }
+
+    fn after<Marker>(mut self, system: impl IntoSystem<Marker>) -> System {
+        self.after.push(system.into_system());
+        self
     }
 }
 
@@ -59,14 +86,14 @@ impl SystemSet {
         self.systems.append(&mut system_set.systems);
     }
 
-    pub fn reads(&self) -> Vec<TypeId> {
+    pub fn reads(&self) -> Vec<AccessType> {
         self.systems
             .iter()
             .flat_map(|system| system.reads().to_vec())
             .collect()
     }
 
-    pub fn writes(&self) -> Vec<TypeId> {
+    pub fn writes(&self) -> Vec<AccessType> {
         self.systems
             .iter()
             .flat_map(|system| system.writes().to_vec())
@@ -96,6 +123,54 @@ impl IntoSystem<()> for SystemSet {
 
         system
     }
+
+    fn before<Marker>(self, other: impl IntoSystem<Marker>) -> System {
+        let mut reads = vec![];
+        let mut writes = vec![];
+
+        for system in &self.systems {
+            reads.extend(system.reads().to_vec());
+            writes.extend(system.writes().to_vec());
+        }
+
+        let mut system = System::new(
+            move |world| {
+                for system in &self.systems {
+                    system.run(world);
+                }
+            },
+            reads,
+            writes,
+        );
+
+        system.before.push(other.into_system());
+
+        system
+    }
+
+    fn after<Marker>(self, other: impl IntoSystem<Marker>) -> System {
+        let mut reads = vec![];
+        let mut writes = vec![];
+
+        for system in &self.systems {
+            reads.extend(system.reads().to_vec());
+            writes.extend(system.writes().to_vec());
+        }
+
+        let mut system = System::new(
+            move |world| {
+                for system in &self.systems {
+                    system.run(world);
+                }
+            },
+            reads,
+            writes,
+        );
+
+        system.after.push(other.into_system());
+
+        system
+    }
 }
 
 pub trait SystemArg {
@@ -113,7 +188,8 @@ impl SystemArg for &World {
     }
 
     fn metas() -> Vec<AccessMeta> {
-        vec![AccessMeta::new::<World>(Access::Read)]
+        let ty = AccessType::world();
+        vec![AccessMeta::new(ty, Access::Read)]
     }
 }
 
@@ -121,6 +197,8 @@ pub type ArgItem<'a, A> = <A as SystemArg>::Item<'a>;
 
 pub trait IntoSystem<M> {
     fn into_system(self) -> System;
+    fn before<Marker>(self, system: impl IntoSystem<Marker>) -> System;
+    fn after<Marker>(self, system: impl IntoSystem<Marker>) -> System;
 }
 
 pub trait IntoSystems<M> {
@@ -135,7 +213,8 @@ impl<R: Resource> SystemArg for &R {
     }
 
     fn metas() -> Vec<AccessMeta> {
-        vec![AccessMeta::new::<R>(Access::Read)]
+        let ty = AccessType::resource::<R>();
+        vec![AccessMeta::new(ty, Access::Read)]
     }
 }
 
@@ -147,7 +226,8 @@ impl<R: Resource> SystemArg for &mut R {
     }
 
     fn metas() -> Vec<AccessMeta> {
-        vec![AccessMeta::new::<R>(Access::Write)]
+        let ty = AccessType::resource::<R>();
+        vec![AccessMeta::new(ty, Access::Write)]
     }
 }
 
@@ -159,7 +239,7 @@ impl SystemArg for &Entities {
     }
 
     fn metas() -> Vec<AccessMeta> {
-        vec![AccessMeta::new::<Entities>(Access::Read)]
+        vec![AccessMeta::new(AccessType::None, Access::Read)]
     }
 }
 
@@ -181,6 +261,42 @@ macro_rules! impl_into_system {
                 let system = System::new(move |world| {
                     (self)($($arg::get(world)),*);
                 }, reads, writes);
+
+                system
+            }
+
+            fn before<Marker>(self, other: impl IntoSystem<Marker>) -> System {
+                let mut reads = vec![];
+                let mut writes = vec![];
+                let mut metas = vec![];
+
+                $(metas.extend($arg::metas());)*
+
+                AccessMeta::pick(&mut reads, &mut writes, &metas);
+
+                let mut system = System::new(move |world| {
+                    (self)($($arg::get(world)),*);
+                }, reads, writes);
+
+                system.before.push(other.into_system());
+
+                system
+            }
+
+            fn after<Marker>(self, other: impl IntoSystem<Marker>) -> System {
+                let mut reads = vec![];
+                let mut writes = vec![];
+                let mut metas = vec![];
+
+                $(metas.extend($arg::metas());)*
+
+                AccessMeta::pick(&mut reads, &mut writes, &metas);
+
+                let mut system = System::new(move |world| {
+                    (self)($($arg::get(world)),*);
+                }, reads, writes);
+
+                system.after.push(other.into_system());
 
                 system
             }

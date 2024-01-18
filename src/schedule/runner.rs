@@ -22,8 +22,12 @@ pub struct SequentialRunner;
 
 impl ScheduleRunner for SequentialRunner {
     fn run(&self, graph: &graph::SystemGraph, world: &World) {
-        for node in graph.nodes() {
-            node.run(world);
+        for row in graph.hierarchy() {
+            for id in row {
+                let node = &graph.nodes()[**id];
+
+                node.run(world);
+            }
         }
     }
 }

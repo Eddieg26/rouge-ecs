@@ -8,6 +8,7 @@ pub struct Blob {
     aligned_layout: Layout,
     data: Vec<u8>,
     drop: Option<fn(*mut u8)>,
+    debug_name: &'static str,
 }
 
 impl Blob {
@@ -15,6 +16,7 @@ impl Blob {
         let base_layout = Layout::new::<T>();
         let aligned_layout = Self::align_layout(&base_layout);
         let data = Vec::with_capacity(aligned_layout.size());
+        let debug_name = std::any::type_name::<T>();
 
         let drop = if std::mem::needs_drop::<T>() {
             Some(drop::<T> as fn(*mut u8))
@@ -29,6 +31,7 @@ impl Blob {
             aligned_layout,
             data,
             drop,
+            debug_name,
         }
     }
 
@@ -36,6 +39,7 @@ impl Blob {
         let base_layout = Layout::new::<T>();
         let aligned_layout = Self::align_layout(&base_layout);
         let data = Vec::with_capacity(aligned_layout.size() * capacity);
+        let debug_name = std::any::type_name::<T>();
 
         let drop = if std::mem::needs_drop::<T>() {
             Some(drop::<T> as fn(*mut u8))
@@ -50,6 +54,7 @@ impl Blob {
             aligned_layout,
             data,
             drop,
+            debug_name,
         }
     }
 
@@ -61,6 +66,7 @@ impl Blob {
             aligned_layout: self.aligned_layout,
             data: Vec::with_capacity(self.aligned_layout.size() * capacity),
             drop: self.drop.clone(),
+            debug_name: self.debug_name,
         }
     }
 
@@ -72,6 +78,7 @@ impl Blob {
             aligned_layout: self.aligned_layout,
             data: std::mem::take(&mut self.data),
             drop: self.drop.clone(),
+            debug_name: self.debug_name,
         };
 
         self.capacity = 0;
@@ -161,6 +168,12 @@ impl Blob {
         self.len += 1;
     }
 
+    pub fn extend<T>(&mut self, values: Vec<T>) {
+        for value in values {
+            self.push(value);
+        }
+    }
+
     pub fn pop<T>(&mut self) -> Option<T> {
         if self.len > 0 {
             self.len -= 1;
@@ -173,19 +186,6 @@ impl Blob {
         } else {
             None
         }
-    }
-
-    pub fn extend<T>(&mut self, values: &[T]) {
-        if self.len + values.len() > self.capacity {
-            self.grow_exact(self.len + values.len());
-        }
-
-        unsafe {
-            let dst = self.offset(self.len) as *mut T;
-            std::ptr::copy_nonoverlapping(values.as_ptr(), dst, values.len());
-        }
-
-        self.len += values.len();
     }
 
     pub fn append(&mut self, other: &mut Blob) {
@@ -204,6 +204,14 @@ impl Blob {
     }
 
     pub fn swap_remove(&mut self, index: usize) -> Blob {
+        if index >= self.len {
+            panic!("Index out of bounds");
+        }
+
+        if self.len == 1 {
+            return self.take();
+        }
+
         unsafe {
             let mut blob = self.copy(1);
 
@@ -315,7 +323,7 @@ impl Blob {
 
     fn drop_all(&mut self) {
         for i in 0..self.len {
-            let ptr = unsafe { self.data.as_ptr().add(i * self.aligned_layout.size()) };
+            let ptr = self.offset(i);
             if let Some(drop) = &self.drop {
                 drop(ptr as *mut u8);
             }

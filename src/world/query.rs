@@ -7,6 +7,7 @@ use crate::{
     core::{Component, ComponentId, Entity},
     storage::table::Table,
     system::SystemArg,
+    world::meta::AccessType,
 };
 
 pub trait BaseQuery {
@@ -29,7 +30,8 @@ impl<C: Component> BaseQuery for &C {
     }
 
     fn metas() -> Vec<AccessMeta> {
-        vec![AccessMeta::new::<C>(Access::Read)]
+        let ty = AccessType::component::<C>();
+        vec![AccessMeta::new(ty, Access::Read)]
     }
 }
 
@@ -45,7 +47,8 @@ impl<C: Component> BaseQuery for &mut C {
     }
 
     fn metas() -> Vec<AccessMeta> {
-        vec![AccessMeta::new::<C>(Access::Write)]
+        let ty = AccessType::component::<C>();
+        vec![AccessMeta::new(ty, Access::Write)]
     }
 }
 
@@ -57,7 +60,8 @@ impl<C: Component> BaseQuery for Option<&C> {
     }
 
     fn metas() -> Vec<AccessMeta> {
-        vec![AccessMeta::new::<C>(Access::Read)]
+        let ty = AccessType::component::<C>();
+        vec![AccessMeta::new(ty, Access::Read)]
     }
 }
 
@@ -69,7 +73,8 @@ impl<C: Component> BaseQuery for Option<&mut C> {
     }
 
     fn metas() -> Vec<AccessMeta> {
-        vec![AccessMeta::new::<C>(Access::Write)]
+        let ty = AccessType::component::<C>();
+        vec![AccessMeta::new(ty, Access::Write)]
     }
 }
 
@@ -81,7 +86,8 @@ impl BaseQuery for Entity {
     }
 
     fn metas() -> Vec<AccessMeta> {
-        vec![AccessMeta::new::<Entity>(Access::Read)]
+        let ty = AccessType::none();
+        vec![AccessMeta::new(ty, Access::Read)]
     }
 }
 

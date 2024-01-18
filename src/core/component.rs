@@ -1,9 +1,4 @@
-use std::{
-    alloc::Layout,
-    any::{Any, TypeId},
-    collections::HashMap,
-    fmt::Debug,
-};
+use std::{alloc::Layout, any::TypeId, collections::HashMap, fmt::Debug};
 
 use crate::storage::blob::Blob;
 

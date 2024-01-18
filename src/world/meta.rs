@@ -3,6 +3,8 @@ use crate::{
     system::observer::{action::ActionOutputs, builtin::RemoveComponent},
 };
 use std::any::TypeId;
+
+use super::resource::Resource;
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Access {
     Read,
@@ -10,24 +12,47 @@ pub enum Access {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub enum AccessType {
+    None,
+    World,
+    Component(TypeId),
+    Resource(TypeId),
+}
+
+impl AccessType {
+    pub fn component<C: Component>() -> Self {
+        Self::Component(TypeId::of::<C>())
+    }
+
+    pub fn resource<R: Resource>() -> Self {
+        Self::Resource(TypeId::of::<R>())
+    }
+
+    pub fn world() -> Self {
+        Self::World
+    }
+
+    pub fn none() -> Self {
+        Self::None
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct AccessMeta {
-    ty: TypeId,
+    ty: AccessType,
     access: Access,
 }
 
 impl AccessMeta {
-    pub fn new<T: 'static>(access: Access) -> Self {
-        Self {
-            ty: TypeId::of::<T>(),
-            access,
-        }
-    }
-
-    pub fn from_type(ty: TypeId, access: Access) -> Self {
+    pub fn new(ty: AccessType, access: Access) -> Self {
         Self { ty, access }
     }
 
-    pub fn ty(&self) -> TypeId {
+    pub fn from_type(ty: AccessType, access: Access) -> Self {
+        Self { ty, access }
+    }
+
+    pub fn ty(&self) -> AccessType {
         self.ty
     }
 
@@ -35,7 +60,7 @@ impl AccessMeta {
         self.access
     }
 
-    pub fn pick(reads: &mut Vec<TypeId>, writes: &mut Vec<TypeId>, metas: &[AccessMeta]) {
+    pub fn pick(reads: &mut Vec<AccessType>, writes: &mut Vec<AccessType>, metas: &[AccessMeta]) {
         for meta in metas {
             match meta.access() {
                 Access::Read => reads.push(meta.ty()),
@@ -44,7 +69,7 @@ impl AccessMeta {
         }
     }
 
-    pub fn collect(types: &[TypeId], access: Access) -> Vec<AccessMeta> {
+    pub fn collect(types: &[AccessType], access: Access) -> Vec<AccessMeta> {
         types
             .iter()
             .map(|&ty| AccessMeta::from_type(ty, access))

@@ -1,7 +1,11 @@
 use super::{ArgItem, SystemArg};
 use crate::{
     storage::{blob::Blob, sparse::SparseMap},
-    world::{meta::AccessMeta, resource::Resource, World},
+    world::{
+        meta::{AccessMeta, AccessType},
+        resource::Resource,
+        World,
+    },
 };
 use std::any::TypeId;
 
@@ -12,15 +16,15 @@ pub use action::*;
 
 pub struct Observer<A: Action> {
     function: Box<dyn Fn(&[A::Output], &World)>,
-    reads: Vec<TypeId>,
-    writes: Vec<TypeId>,
+    reads: Vec<AccessType>,
+    writes: Vec<AccessType>,
 }
 
 impl<A: Action> Observer<A> {
     fn new(
         function: impl Fn(&[A::Output], &World) + 'static,
-        reads: Vec<TypeId>,
-        writes: Vec<TypeId>,
+        reads: Vec<AccessType>,
+        writes: Vec<AccessType>,
     ) -> Self {
         Self {
             function: Box::new(function),
@@ -29,15 +33,15 @@ impl<A: Action> Observer<A> {
         }
     }
 
-    pub fn reads(&self) -> &[TypeId] {
+    pub fn reads(&self) -> &[AccessType] {
         &self.reads
     }
 
-    pub fn writes(&self) -> &[TypeId] {
+    pub fn writes(&self) -> &[AccessType] {
         &self.writes
     }
 
-    pub fn run(&mut self, outputs: &[A::Output], world: &World) {
+    pub fn run(&self, outputs: &[A::Output], world: &World) {
         (self.function)(outputs, world);
     }
 }
@@ -93,11 +97,11 @@ impl ObserverSystems {
             executor: Box::new(move |mut outputs, systems, world| {
                 let outputs = outputs.to_vec();
 
-                for system in systems.iter_mut::<Observer<A>>() {
+                for system in systems.iter_mut::<Box<Observer<A>>>() {
                     system.run(&outputs, world);
                 }
             }),
-            systems: Blob::new::<Observer<A>>(),
+            systems: Blob::new::<Box<Observer<A>>>(),
             priority: A::PRIORITY,
         }
     }
@@ -107,11 +111,13 @@ impl ObserverSystems {
     }
 
     pub fn add_observer<A: Action>(&mut self, observer: Observer<A>) {
-        self.systems.push(observer);
+        self.systems.push(Box::new(observer));
     }
 
-    pub fn add_observers<A: Action>(&mut self, observers: &mut Vec<Observer<A>>) {
-        self.systems.extend(observers);
+    pub fn add_observers<A: Action>(&mut self, observers: Vec<Observer<A>>) {
+        for observer in observers {
+            self.add_observer(observer);
+        }
     }
 
     pub fn execute(&mut self, outputs: Blob, world: &World) {
@@ -149,19 +155,22 @@ impl Observables {
         let type_id = TypeId::of::<A>();
 
         if let Some(systems) = self.observers.get_mut(&type_id) {
-            systems.add_observers(&mut observers.take());
+            systems.add_observers(observers.take());
         } else {
             let mut systems = ObserverSystems::new::<A>();
-            systems.add_observers(&mut observers.take());
+            systems.add_observers(observers.take());
             self.observers.insert(type_id, systems);
         }
 
         self.sort();
     }
 
+    pub fn swap(&mut self, mut observables: Observables) {
+        std::mem::swap(&mut self.observers, &mut observables.observers);
+    }
+
     pub fn sort(&mut self) {
-        self.observers
-            .sort(|(_, a), (_, b)| a.priority().cmp(&b.priority()));
+        self.observers.sort(|a, b| a.priority().cmp(&b.priority()));
     }
 
     pub fn execute(&mut self, mut outputs: ActionOutputs, world: &World) {

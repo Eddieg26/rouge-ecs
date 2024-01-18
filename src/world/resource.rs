@@ -1,6 +1,5 @@
 use crate::storage::{blob::Blob, ptr::Ptr};
 use std::{
-    alloc::Layout,
     any::TypeId,
     collections::HashMap,
     fmt::Debug,
@@ -82,16 +81,14 @@ impl Resources {
 
 pub struct ResourceData {
     data: Blob,
-    layout: Layout,
 }
 
 impl ResourceData {
     pub fn new<R: Resource>(resource: R) -> Self {
-        let layout = Layout::new::<R>();
         let mut data = Blob::new::<R>();
         data.push(resource);
 
-        ResourceData { data, layout }
+        ResourceData { data }
     }
 
     pub fn ptr<'a>(&'a self) -> Ptr<'a> {

@@ -239,8 +239,10 @@ where
     pub fn remove(&mut self, key: &K) -> Option<V> {
         if let Some(index) = self.map.remove(key) {
             let value = self.values.swap_remove(index);
-            let key = self.keys.swap_remove(index);
-            self.map.insert(key, index);
+            self.keys.swap_remove(index);
+            if self.keys.len() > index {
+                self.map.insert(self.keys[index].clone(), index);
+            }
             Some(value)
         } else {
             None
@@ -304,12 +306,20 @@ where
         other.clear();
     }
 
-    pub fn sort(&mut self, sorter: fn((&K, &V), (&K, &V)) -> std::cmp::Ordering) {
+    pub fn sort(&mut self, sorter: fn(&V, &V) -> std::cmp::Ordering) {
         self.keys.sort_by(|a, b| {
             let value_a = &self.values[*self.map.get(a).unwrap()];
             let value_b = &self.values[*self.map.get(b).unwrap()];
-            sorter((a, value_a), (b, value_b))
+            sorter(value_a, value_b)
         });
+
+        self.map.clear();
+
+        for (index, key) in self.keys.iter().enumerate() {
+            self.map.insert(key.clone(), index);
+        }
+
+        self.values.sort_by(sorter);
     }
 
     pub fn into_immutable(self) -> ImmutableSparseMap<K, V> {

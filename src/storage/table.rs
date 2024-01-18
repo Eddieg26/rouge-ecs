@@ -202,6 +202,10 @@ impl<I: Into<GenId> + Clone> Table<I> {
         }
     }
 
+    pub fn columns(&self) -> impl Iterator<Item = &Column> {
+        self.columns.iter()
+    }
+
     pub fn column(&self, index: usize) -> Option<&Column> {
         self.columns.get(index)
     }

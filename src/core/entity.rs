@@ -42,7 +42,12 @@ impl Entities {
 
     pub fn create(&mut self) -> Entity {
         let id = self.allocator.allocate();
-        Entity::new(id.id(), id.generation())
+        let node = EntityNode::new(None);
+        let entity = Entity::new(id.id(), id.generation());
+
+        self.nodes.insert(entity, node);
+
+        entity
     }
 
     pub fn delete(&mut self, entity: Entity, recursive: bool) -> Vec<Entity> {
@@ -87,6 +92,39 @@ impl Entities {
 pub struct EntityNode {
     parent: Option<Entity>,
     children: Vec<Entity>,
+}
+
+impl EntityNode {
+    pub fn new(parent: Option<Entity>) -> Self {
+        Self {
+            parent,
+            children: Vec::new(),
+        }
+    }
+
+    pub fn parent(&self) -> Option<Entity> {
+        self.parent
+    }
+
+    pub fn children(&self) -> &[Entity] {
+        &self.children
+    }
+
+    pub fn children_mut(&mut self) -> &mut [Entity] {
+        &mut self.children
+    }
+
+    pub fn add_child(&mut self, entity: Entity) {
+        self.children.push(entity);
+    }
+
+    pub fn remove_child(&mut self, entity: Entity) {
+        self.children.retain(|e| *e != entity);
+    }
+
+    pub fn set_parent(&mut self, parent: Option<Entity>) {
+        self.parent = parent;
+    }
 }
 
 impl Entities {

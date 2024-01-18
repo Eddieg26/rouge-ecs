@@ -82,9 +82,18 @@ impl Actions {
         }
     }
 
+    pub fn append(&mut self, mut actions: Actions) {
+        for (type_id, mut data) in actions.actions.drain() {
+            if let Some(other) = self.actions.get_mut(&type_id) {
+                other.actions.append(&mut data.actions);
+            } else {
+                self.actions.insert(type_id, data);
+            }
+        }
+    }
+
     fn sort(&mut self) {
-        self.actions
-            .sort(|(_, a), (_, b)| a.priority().cmp(&b.priority()));
+        self.actions.sort(|a, b| a.priority().cmp(&b.priority()));
     }
 
     pub fn execute(&mut self, world: &mut World) -> ActionOutputs {
@@ -122,6 +131,12 @@ impl ActionOutputs {
     }
 
     pub fn add<A: Action>(&mut self, output: A::Output) {
+        println!(
+            "ACTION OUTPUT: {:?}, Name: {}",
+            TypeId::of::<A>(),
+            std::any::type_name::<A>()
+        );
+
         if let Some(outputs) = self.outputs.get_mut(&TypeId::of::<A>()) {
             outputs.push(output);
         } else {

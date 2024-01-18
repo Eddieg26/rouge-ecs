@@ -1,11 +1,14 @@
 use crate::{
     storage::sparse::SparseMap,
-    system::{IntoSystem, System},
-    world::{resource::Resource, World},
+    system::IntoSystem,
+    world::{meta::AccessType, resource::Resource, World},
 };
 use std::any::{Any, TypeId};
 
-use self::graph::SystemGraph;
+use self::{
+    graph::SystemGraph,
+    runner::{ParallelRunner, ScheduleRunner, SequentialRunner},
+};
 
 pub mod graph;
 pub mod runner;
@@ -20,12 +23,14 @@ pub trait SchedulePhase: 'static {
 
 pub struct Schedule {
     graph: SystemGraph,
+    runner: Box<dyn ScheduleRunner>,
 }
 
 impl Schedule {
     pub fn new() -> Self {
         Self {
             graph: SystemGraph::new(),
+            runner: Box::new(ParallelRunner),
         }
     }
 
@@ -37,16 +42,20 @@ impl Schedule {
         self.graph.append(&mut schedule.graph);
     }
 
-    pub fn reads(&self) -> Vec<TypeId> {
+    pub fn reads(&self) -> Vec<AccessType> {
         self.graph.reads()
     }
 
-    pub fn writes(&self) -> Vec<TypeId> {
+    pub fn writes(&self) -> Vec<AccessType> {
         self.graph.writes()
     }
 
     pub fn run(&self, world: &World) {
-        // self.graph.run
+        self.runner.run(&self.graph, world);
+    }
+
+    pub(crate) fn build(&mut self) {
+        self.graph.build();
     }
 }
 
@@ -119,6 +128,14 @@ impl Schedules {
         }
     }
 
+    pub(crate) fn build(&mut self) {
+        for phase in self.schedules.values_mut() {
+            for schedule in phase.values_mut() {
+                schedule.build();
+            }
+        }
+    }
+
     pub fn clear(&mut self) {
         self.schedules.clear();
     }
@@ -129,6 +146,10 @@ pub struct GlobalSchedules(Schedules);
 impl GlobalSchedules {
     pub fn new() -> Self {
         Self(Schedules::new())
+    }
+
+    pub fn build(&mut self) {
+        self.0.build();
     }
 }
 
@@ -159,6 +180,10 @@ pub struct SceneSchedules(Schedules);
 impl SceneSchedules {
     pub fn new() -> Self {
         Self(Schedules::new())
+    }
+
+    pub fn build(&mut self) {
+        self.0.build();
     }
 }
 

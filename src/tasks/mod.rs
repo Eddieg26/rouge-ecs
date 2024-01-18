@@ -1,5 +1,5 @@
 use std::{
-    sync::{mpsc::Sender, Arc, Mutex},
+    sync::mpsc::Sender,
     thread::{JoinHandle, ScopedJoinHandle},
 };
 
@@ -24,7 +24,7 @@ pub struct TaskPool {
     sender: Sender<Job>,
 }
 
-type Job = Box<dyn FnOnce() + Send + 'static>;
+type Job = Option<Box<dyn FnOnce() + Send + 'static>>;
 
 impl TaskPool {
     pub fn new(size: usize) -> Self {
@@ -36,9 +36,12 @@ impl TaskPool {
         for id in 0..size {
             let receiver = receiver.clone();
             let thread = std::thread::spawn(move || loop {
-                let job: Box<dyn FnOnce() + Send> = receiver.lock().unwrap().recv().unwrap();
+                let job: Job = receiver.lock().unwrap().recv().unwrap();
 
-                job();
+                match job {
+                    Some(job) => job(),
+                    None => break,
+                }
             });
 
             workers.push(Worker::new(id, thread));
@@ -48,12 +51,12 @@ impl TaskPool {
     }
 
     pub fn execute(&self, f: impl FnOnce() + Send + 'static) {
-        let boxed = Box::new(f);
-        self.sender.send(boxed).unwrap();
+        self.sender.send(Some(Box::new(f))).unwrap();
     }
 
     pub fn join(&mut self) {
         for worker in &mut self.workers {
+            self.sender.send(None).unwrap();
             if let Some(thread) = worker.thread.take() {
                 thread.join().unwrap();
             }
@@ -83,7 +86,7 @@ impl<'a> ScopedWorker<'a> {
     }
 }
 
-type ScopedJob<'a> = Box<dyn FnOnce() + Send + 'a>;
+type ScopedJob<'a> = Option<Box<dyn FnOnce() + Send + 'a>>;
 
 pub struct ScopedTaskPool<'a> {
     sender: Sender<ScopedJob<'a>>,
@@ -103,7 +106,10 @@ impl<'a> ScopedTaskPool<'a> {
                 let thread = s.spawn(move || loop {
                     let job: ScopedJob<'a> = receiver.lock().unwrap().recv().unwrap();
 
-                    job();
+                    match job {
+                        Some(job) => job(),
+                        None => break,
+                    }
                 });
 
                 workers.push(ScopedWorker::new(id, thread));
@@ -117,7 +123,16 @@ impl<'a> ScopedTaskPool<'a> {
     }
 
     pub fn execute(&self, f: impl FnOnce() + Send + 'a) {
-        let boxed = Box::new(f);
-        self.sender.send(boxed).unwrap();
+        self.sender.send(Some(Box::new(f))).unwrap();
+    }
+
+    pub fn join(&mut self) {
+        self.sender.send(None).unwrap();
+    }
+}
+
+impl<'a> Drop for ScopedTaskPool<'a> {
+    fn drop(&mut self) {
+        self.join();
     }
 }

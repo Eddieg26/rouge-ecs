@@ -163,6 +163,7 @@ impl World {
             {
                 for column in row.indices() {
                     let id = ComponentId::from(column);
+
                     if let Some(meta) = self.components.meta(id).extension::<ComponentActionMeta>()
                     {
                         (meta.on_remove())(&entity, self.resources.get_mut::<ActionOutputs>());
@@ -203,7 +204,7 @@ impl World {
             let mut actions = std::mem::take(self.resources.get_mut::<Actions>());
             let mut outputs = actions.execute(self);
             let action_outputs = self.resources.get_mut::<ActionOutputs>().take();
-            std::mem::swap(&mut actions, self.resource_mut::<Actions>());
+            self.resources.get_mut::<Actions>().append(actions);
 
             outputs.merge(action_outputs);
             outputs
@@ -211,8 +212,16 @@ impl World {
 
         let mut observers = std::mem::take(self.resources.get_mut::<Observables>());
         observers.execute(outputs, self);
-        std::mem::swap(&mut observers, self.resources.get_mut::<Observables>());
+        self.resources.get_mut::<Observables>().swap(observers);
 
         self.flush();
+    }
+
+    pub fn build_schedules(&mut self) {
+        let schedules = self.resources.get_mut::<GlobalSchedules>();
+        schedules.build();
+
+        let schedules = self.resources.get_mut::<SceneSchedules>();
+        schedules.build();
     }
 }
