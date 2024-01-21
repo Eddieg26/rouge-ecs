@@ -58,8 +58,16 @@ fn start(actions: &mut Actions) {
     actions.add(CreateEntity::new());
 }
 
-fn update(actions: &mut Actions) {
+fn update() {
     println!("Update");
+}
+
+fn test() {
+    println!("Test");
+}
+
+fn world_system(world: &World) {
+    println!("World System");
 }
 
 fn post_update(actions: &mut Actions) {
@@ -92,6 +100,7 @@ fn main() {
     let mut world = World::new();
     world.register::<Player>();
     world.add_system(Update, DefaultLabel, update.after(start));
+    world.add_system(Update, DefaultLabel, test.before(world_system));
     world.add_system(PostUpdate, DefaultLabel, post_update);
 
     let add_player_systems = Observers::<AddComponent<Player>>::new().add_system(player_added);
@@ -102,11 +111,9 @@ fn main() {
     world.add_observers(remove_player_systems);
     world.add_observers(delete_entity_systems);
 
-    world.build_schedules();
+    world.init();
     world.run::<Update>();
     world.run::<PostUpdate>();
-
-    println!("DONE");
 }
 
 // #[derive(Debug)]

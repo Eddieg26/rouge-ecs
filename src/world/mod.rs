@@ -217,7 +217,7 @@ impl World {
         self.flush();
     }
 
-    pub fn build_schedules(&mut self) {
+    pub fn init(&mut self) {
         let schedules = self.resources.get_mut::<GlobalSchedules>();
         schedules.build();
 

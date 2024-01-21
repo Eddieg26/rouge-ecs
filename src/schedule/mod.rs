@@ -7,7 +7,7 @@ use std::any::{Any, TypeId};
 
 use self::{
     graph::SystemGraph,
-    runner::{ParallelRunner, ScheduleRunner, SequentialRunner},
+    runner::{ParallelRunner, ScheduleRunner},
 };
 
 pub mod graph;
@@ -54,7 +54,7 @@ impl Schedule {
         self.runner.run(&self.graph, world);
     }
 
-    pub(crate) fn build(&mut self) {
+    pub fn build(&mut self) {
         self.graph.build();
     }
 }

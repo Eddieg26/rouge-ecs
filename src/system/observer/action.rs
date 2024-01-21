@@ -131,12 +131,6 @@ impl ActionOutputs {
     }
 
     pub fn add<A: Action>(&mut self, output: A::Output) {
-        println!(
-            "ACTION OUTPUT: {:?}, Name: {}",
-            TypeId::of::<A>(),
-            std::any::type_name::<A>()
-        );
-
         if let Some(outputs) = self.outputs.get_mut(&TypeId::of::<A>()) {
             outputs.push(output);
         } else {

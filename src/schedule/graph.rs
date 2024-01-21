@@ -2,7 +2,10 @@ use crate::{
     system::System,
     world::{meta::AccessType, World},
 };
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    vec,
+};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct NodeId(usize);
@@ -37,6 +40,13 @@ pub struct Node {
 }
 
 impl Node {
+    pub fn new(system: System) -> Self {
+        Self {
+            system,
+            dependencies: vec![],
+        }
+    }
+
     pub fn run(&self, world: &World) {
         self.system.run(world);
     }
@@ -52,18 +62,9 @@ impl Node {
     pub fn dependencies(&self) -> &[NodeId] {
         &self.dependencies
     }
-}
 
-impl Node {
-    pub fn new(system: System) -> Self {
-        Self {
-            system,
-            dependencies: Vec::new(),
-        }
-    }
-
-    pub fn add_dependency(&mut self, node_id: NodeId) {
-        self.dependencies.push(node_id);
+    pub fn add_dependency(&mut self, dependency: NodeId) {
+        self.dependencies.push(dependency);
     }
 }
 
@@ -81,20 +82,34 @@ impl SystemGraph {
     }
 
     pub fn add_system(&mut self, mut system: System) -> NodeId {
-        let after_nodes = std::mem::take(system.afters_mut());
-        let before_nodes = std::mem::take(system.befores_mut());
-        let node = Node::new(system);
+        let mut before_systems = std::mem::take(system.befores_mut());
 
+        let after_ids = system
+            .afters_mut()
+            .drain(..)
+            .into_iter()
+            .map(|system| self.add_system(system))
+            .collect::<Vec<_>>();
+
+        let node = Node::new(system);
         let node_id = self.add_node(node);
 
-        for after in after_nodes {
-            let after_id = self.add_system(after);
-            self.nodes[*node_id].add_dependency(after_id);
+        for after_id in after_ids {
+            if self.nodes[*after_id].reads().contains(&AccessType::World) {
+                self.nodes[*after_id].add_dependency(node_id);
+            }
         }
 
-        for before in before_nodes {
-            let before_id = self.add_system(before);
-            self.nodes[*before_id].add_dependency(node_id);
+        let before_ids = before_systems
+            .drain(..)
+            .into_iter()
+            .map(|system| self.add_system(system))
+            .collect::<Vec<_>>();
+
+        if self.nodes[*node_id].reads().contains(&AccessType::World) {
+            for before_id in before_ids {
+                self.nodes[*node_id].add_dependency(before_id);
+            }
         }
 
         node_id
@@ -172,7 +187,7 @@ impl SystemGraph {
         let mut hierarchy = Vec::new();
 
         while !dependency_graph.is_empty() {
-            let group = dependency_graph
+            let mut group = dependency_graph
                 .keys()
                 .filter_map(|node_id| {
                     dependency_graph
@@ -182,12 +197,38 @@ impl SystemGraph {
                 })
                 .collect::<Vec<NodeId>>();
 
+            group.sort();
+
             for node_id in &group {
                 dependency_graph.remove(node_id);
             }
 
+            let world_nodes = group
+                .iter()
+                .filter_map(|node_id| {
+                    self.nodes[**node_id]
+                        .reads()
+                        .contains(&AccessType::World)
+                        .then_some(*node_id)
+                })
+                .collect::<Vec<_>>();
+
+            group.retain(|node_id| !world_nodes.contains(&node_id));
+
             hierarchy.insert(0, group);
+
+            for world_id in world_nodes {
+                hierarchy.push(vec![world_id])
+            }
         }
+
+        hierarchy.sort_by(|a, b| {
+            let a_first = a.first().unwrap();
+            let b_first = b.first().unwrap();
+
+            a_first.cmp(b_first)
+        });
+
         self.hierarchy = hierarchy;
     }
 

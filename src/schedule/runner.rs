@@ -36,29 +36,31 @@ pub struct ParallelRunner;
 
 impl ScheduleRunner for ParallelRunner {
     fn run(&self, graph: &graph::SystemGraph, world: &World) {
+        let available_threads = std::thread::available_parallelism()
+            .unwrap_or(NonZeroUsize::new(1).unwrap())
+            .into();
         for row in graph.hierarchy() {
-            let num_threads = row.len().min(
-                std::thread::available_parallelism()
-                    .unwrap_or(NonZeroUsize::new(1).unwrap())
-                    .into(),
-            );
+            let num_threads = row.len().min(available_threads);
 
-            let pool = ScopedTaskPool::new(num_threads);
+            ScopedTaskPool::new(num_threads, |sender| {
+                let (barrier, lock) = JobBarrier::new(row.len());
+                let barrier = Arc::new(Mutex::new(barrier));
 
-            let barrier = Arc::new(Mutex::new(JobBarrier::new(row.len())));
+                for node in row {
+                    let barrier = barrier.clone();
+                    let node = &graph.nodes()[node.id()];
 
-            for node in row {
-                let barrier = barrier.clone();
-                let node = &graph.nodes()[node.id()];
+                    sender.send(move || {
+                        node.run(world);
 
-                pool.execute(move || {
-                    node.run(world);
+                        barrier.lock().unwrap().notify();
+                    });
+                }
 
-                    barrier.lock().unwrap().notify();
-                });
-            }
+                sender.join();
 
-            barrier.lock().unwrap().wait(barrier.lock().unwrap());
+                lock.wait(barrier.lock().unwrap());
+            });
         }
     }
 }

@@ -243,6 +243,48 @@ impl SystemArg for &Entities {
     }
 }
 
+impl<F: Fn() + Send + Sync + 'static> IntoSystem<F> for F {
+    fn into_system(self) -> System {
+        let system = System::new(
+            move |_| {
+                (self)();
+            },
+            vec![],
+            vec![],
+        );
+
+        system
+    }
+
+    fn before<Marker>(self, other: impl IntoSystem<Marker>) -> System {
+        let mut system = System::new(
+            move |_| {
+                (self)();
+            },
+            vec![],
+            vec![],
+        );
+
+        system.before.push(other.into_system());
+
+        system
+    }
+
+    fn after<Marker>(self, other: impl IntoSystem<Marker>) -> System {
+        let mut system = System::new(
+            move |_| {
+                (self)();
+            },
+            vec![],
+            vec![],
+        );
+
+        system.after.push(other.into_system());
+
+        system
+    }
+}
+
 macro_rules! impl_into_system {
     ($($arg:ident),*) => {
         impl<F, $($arg: SystemArg),*> IntoSystem<(F, $($arg),*)> for F

@@ -1,6 +1,6 @@
 use std::{
     sync::mpsc::Sender,
-    thread::{JoinHandle, ScopedJoinHandle},
+    thread::{sleep, JoinHandle},
 };
 
 pub mod barrier;
@@ -16,6 +16,12 @@ impl Worker {
             id,
             thread: Some(thread),
         }
+    }
+}
+
+impl std::fmt::Display for Worker {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[Worker {}]", self.id)
     }
 }
 
@@ -70,19 +76,33 @@ impl Drop for TaskPool {
     }
 }
 
-pub struct ScopedWorker<'a> {
-    id: usize,
-    thread: Option<ScopedJoinHandle<'a, ()>>,
-    _marker: std::marker::PhantomData<&'a ()>,
+pub struct ScopedSender<'a> {
+    sender: Sender<ScopedJob<'a>>,
+    thread_count: usize,
 }
 
-impl<'a> ScopedWorker<'a> {
-    fn new(id: usize, thread: ScopedJoinHandle<'a, ()>) -> Self {
+impl<'a> ScopedSender<'a> {
+    pub fn new(sender: Sender<ScopedJob<'a>>, thread_count: usize) -> Self {
         Self {
-            id,
-            thread: Some(thread),
-            _marker: std::marker::PhantomData,
+            sender,
+            thread_count,
         }
+    }
+
+    pub fn send(&self, f: impl FnOnce() + Send + Sync + 'a) {
+        let _ = self.sender.send(Some(Box::new(f)));
+    }
+
+    pub fn join(&self) {
+        for _ in 0..self.thread_count {
+            let _ = self.sender.send(None);
+        }
+    }
+}
+
+impl<'a> Drop for ScopedSender<'a> {
+    fn drop(&mut self) {
+        self.join();
     }
 }
 
@@ -94,26 +114,35 @@ pub struct ScopedTaskPool<'a> {
 }
 
 impl<'a> ScopedTaskPool<'a> {
-    pub fn new(size: usize) -> Self {
+    pub fn new(size: usize, executor: impl Fn(ScopedSender<'a>)) -> Self {
         let (sender, receiver) = std::sync::mpsc::channel();
         let receiver = std::sync::Arc::new(std::sync::Mutex::new(receiver));
 
-        std::thread::scope(|s| {
-            let mut workers = Vec::with_capacity(size);
-
-            for id in 0..size {
+        std::thread::scope(|scope| {
+            for _ in 0..size {
                 let receiver = receiver.clone();
-                let thread = s.spawn(move || loop {
-                    let job: ScopedJob<'a> = receiver.lock().unwrap().recv().unwrap();
+                scope.spawn(move || loop {
+                    let receiver = match receiver.lock() {
+                        Ok(receiver) => receiver,
+                        Err(_) => break,
+                    };
+
+                    let job: ScopedJob = match receiver.recv() {
+                        Ok(job) => job,
+                        Err(_) => break,
+                    };
 
                     match job {
-                        Some(job) => job(),
+                        Some(job) => {
+                            job();
+                            sleep(std::time::Duration::from_nanos(1));
+                        }
                         None => break,
                     }
                 });
-
-                workers.push(ScopedWorker::new(id, thread));
             }
+
+            executor(ScopedSender::new(sender.clone(), size));
         });
 
         Self {
@@ -128,11 +157,5 @@ impl<'a> ScopedTaskPool<'a> {
 
     pub fn join(&mut self) {
         self.sender.send(None).unwrap();
-    }
-}
-
-impl<'a> Drop for ScopedTaskPool<'a> {
-    fn drop(&mut self) {
-        self.join();
     }
 }
